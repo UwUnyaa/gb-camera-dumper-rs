@@ -1,36 +1,55 @@
 use anyhow::{Context, Result, anyhow, bail};
 use serialport::{ClearBuffer, SerialPort};
+use std::env;
 use std::io::{ErrorKind, Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-const BAUD_RATES: [u32; 2] = [1_000_000, 1_700_000];
+const PROBE_TIMEOUT_MS: u64 = 1_000;
+const BAUD_RATES: [u32; 3] = [1_000_000, 1_700_000, 1_500_000];
 const STREAM_BLOCK_SIZE: usize = 64;
 const HEADER_READ_LENGTH: usize = 0x180;
 const CART_MODE_COMMAND: u8 = b'C';
 const READ_PCB_VERSION_COMMAND: u8 = b'h';
 const READ_FIRMWARE_VERSION_COMMAND: u8 = b'V';
-const SET_START_ADDRESS_COMMAND: u8 = b'A';
-const READ_ROM_RAM_COMMAND: u8 = b'R';
 const GB_CART_MODE_COMMAND: u8 = b'G';
-const SET_BANK_COMMAND: u8 = b'B';
 const STOP_STREAM_COMMAND: u8 = b'0';
-const CONTINUE_STREAM_COMMAND: u8 = b'1';
 const VOLTAGE_5V_COMMAND: u8 = b'5';
 const QUERY_CART_POWER_COMMAND: u8 = b']';
 const POWER_CART_ON_COMMAND: u8 = b'/';
+const RESET_AVR_COMMAND: u8 = b'*';
+const CART_POWER_ON_BINARY_COMMAND: u8 = 0xF2;
+const QUERY_CART_POWER_BINARY_COMMAND: u8 = 0xF4;
+const SET_MODE_DMG_COMMAND: u8 = 0xA3;
+const SET_VOLTAGE_5V_BINARY_COMMAND: u8 = 0xA5;
+const SET_VARIABLE_COMMAND: u8 = 0xA6;
+const DISABLE_PULLUPS_COMMAND: u8 = 0xAC;
+const DMG_CART_READ_COMMAND: u8 = 0xB1;
+const DMG_CART_WRITE_COMMAND: u8 = 0xB2;
+const DMG_MBC_RESET_COMMAND: u8 = 0xB4;
 
 const CART_MODE_GB: u8 = 1;
 const CART_MODE_GBA: u8 = 2;
 const PCB_1_3: u8 = 4;
 const PCB_1_4: u8 = 5;
 const PCB_GBXMAS: u8 = 90;
+const FW_VAR_ADDRESS: u32 = 0x00;
+const FW_VAR_TRANSFER_SIZE: u32 = 0x00;
+const FW_VAR_CART_MODE: u32 = 0x00;
+const FW_VAR_DMG_ACCESS_MODE: u32 = 0x01;
+const FW_VAR_DMG_READ_CS_PULSE: u32 = 0x08;
+const DMG_ACCESS_MODE_ROM_READ: u32 = 0x01;
+const DMG_ACCESS_MODE_RAM_READ: u32 = 0x03;
 
 const NINTENDO_LOGO: [u8; 48] = [
     0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
     0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E, 0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
     0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
 ];
+
+static DEBUG_ENABLED: AtomicBool = AtomicBool::new(false);
+static DEBUG_VERBOSE_ENABLED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CartridgeMode {
@@ -80,17 +99,15 @@ pub struct GbxcartDevice {
 }
 
 impl GbxcartDevice {
-    pub fn autodetect(
-        preferred_port: Option<&str>,
-        timeout: Duration,
-    ) -> Result<(Self, Vec<String>)> {
+    pub fn autodetect() -> Result<(Self, Vec<String>)> {
+        let timeout = Duration::from_millis(PROBE_TIMEOUT_MS);
         let ports = serialport::available_ports()
             .context("failed to enumerate serial ports for probing")?;
         if ports.is_empty() {
             bail!("no serial ports detected");
         }
 
-        let ordered_ports = ordered_port_names(&ports, preferred_port);
+        let ordered_ports = ordered_port_names(&ports);
         let mut attempts = Vec::new();
 
         for port_name in ordered_ports {
@@ -119,60 +136,94 @@ impl GbxcartDevice {
     }
 
     pub fn prepare_for_game_boy_camera(&mut self) -> Result<()> {
-        if matches!(self.info.pcb_version, PCB_1_3 | PCB_1_4 | PCB_GBXMAS) {
+        if self.info.firmware_version >= 12 {
+            debug_log("using modern firmware prep path");
+            let power_query = self.request_value(QUERY_CART_POWER_BINARY_COMMAND);
+            match &power_query {
+                Ok(value) => debug_log(&format!("binary query cart power returned 0x{value:02X}")),
+                Err(error) => debug_log(&format!("binary query cart power failed: {error:#}")),
+            }
+
+            self.send_command_expect_ack(SET_MODE_DMG_COMMAND, "set DMG mode")?;
+            self.send_command_expect_ack(SET_VOLTAGE_5V_BINARY_COMMAND, "set 5V")?;
+            self.send_command_expect_ack(DISABLE_PULLUPS_COMMAND, "disable pullups")?;
+            self.set_fw_variable(1, FW_VAR_CART_MODE, 1)?;
+            self.set_fw_variable(4, FW_VAR_ADDRESS, 0)?;
+
+            if matches!(power_query, Ok(0)) {
+                self.send_command_expect_ack(CART_POWER_ON_BINARY_COMMAND, "power on cartridge")?;
+                thread::sleep(Duration::from_millis(200));
+            }
+
+            self.send_command_expect_ack(DMG_MBC_RESET_COMMAND, "reset DMG mapper")?;
+            thread::sleep(Duration::from_millis(150));
+            self.clear_buffers()?;
+            self.info.cartridge_mode = CartridgeMode::GameBoy;
+            debug_log("modern firmware prep completed");
+            return Ok(());
+        }
+
+        let power_query = self.request_value(QUERY_CART_POWER_COMMAND);
+        match &power_query {
+            Ok(value) => debug_log(&format!("query cart power returned 0x{value:02X}")),
+            Err(error) => debug_log(&format!("query cart power failed: {error:#}")),
+        }
+        let should_power_on = match power_query {
+            Ok(0) => true,
+            Ok(_) => false,
+            Err(_) => self.info.firmware_version != 0,
+        };
+
+        if matches!(self.info.pcb_version, PCB_1_3 | PCB_1_4 | PCB_GBXMAS)
+            || self.info.firmware_version != 0
+        {
+            debug_log("sending legacy 5V command");
             self.send_command(VOLTAGE_5V_COMMAND)
                 .context("failed to switch the GBxCart RW to 5V mode")?;
             thread::sleep(Duration::from_millis(500));
+            self.clear_buffers().ok();
         }
 
-        if self.info.pcb_version == PCB_1_4 {
-            let cart_powered = self
-                .request_value(QUERY_CART_POWER_COMMAND)
-                .context("failed to query cartridge power state")?;
-            if cart_powered == 0 {
-                self.send_command(POWER_CART_ON_COMMAND)
-                    .context("failed to power on the cartridge")?;
-                thread::sleep(Duration::from_millis(500));
-                self.clear_buffers()?;
-            }
+        if should_power_on {
+            debug_log("sending legacy cart power on command");
+            self.send_command(POWER_CART_ON_COMMAND)
+                .context("failed to power on the cartridge")?;
+            thread::sleep(Duration::from_millis(500));
+            self.clear_buffers().ok();
         }
 
+        debug_log("switching to DMG mode and resetting mapper");
         self.send_command(GB_CART_MODE_COMMAND)
             .context("failed to switch the GBxCart RW into Game Boy cart mode")?;
-        thread::sleep(Duration::from_millis(10));
+        self.send_command(SET_MODE_DMG_COMMAND)
+            .context("failed to switch the GBxCart RW into binary Game Boy mode")?;
+        self.send_command(SET_VOLTAGE_5V_BINARY_COMMAND)
+            .context("failed to switch the GBxCart RW into binary 5V mode")?;
+        self.send_command(DMG_MBC_RESET_COMMAND)
+            .context("failed to reset the DMG mapper before reading")?;
+        thread::sleep(Duration::from_millis(150));
         self.clear_buffers()?;
         self.info.cartridge_mode = self
             .request_value(CART_MODE_COMMAND)
             .context("failed to confirm Game Boy cart mode after switching")?
             .try_into()
             .map_err(|mode: u8| anyhow!("unexpected cart mode response 0x{mode:02X}"))?;
+        debug_log(&format!("confirmed cart mode after prep: {:?}", self.info.cartridge_mode));
 
         Ok(())
     }
 
     pub fn read_cartridge_header(&mut self) -> Result<CartridgeHeader> {
-        self.send_number(SET_START_ADDRESS_COMMAND, 0)
-            .context("failed to set the header read start address")?;
-        self.send_command(READ_ROM_RAM_COMMAND)
-            .context("failed to start ROM streaming for header read")?;
-
-        let read_result = (|| -> Result<[u8; HEADER_READ_LENGTH]> {
-            let mut header = [0_u8; HEADER_READ_LENGTH];
-            for (index, chunk) in header.chunks_mut(STREAM_BLOCK_SIZE).enumerate() {
-                self.read_exact_into(chunk)
-                    .with_context(|| format!("failed to read header chunk {index}"))?;
-                if index + 1 != HEADER_READ_LENGTH / STREAM_BLOCK_SIZE {
-                    self.send_command(CONTINUE_STREAM_COMMAND)
-                        .context("failed to request the next header chunk")?;
-                }
-            }
-            Ok(header)
-        })();
-
-        self.stop_stream()
-            .context("failed to stop ROM streaming after header read")?;
-
-        let header = read_result?;
+        let header = self
+            .read_dmg_rom(0, HEADER_READ_LENGTH)
+            .context("failed to read the cartridge header")?;
+        debug_log(&format!(
+            "header bytes: {}",
+            format_bytes(&header[..header.len().min(64)])
+        ));
+        let header: [u8; HEADER_READ_LENGTH] = header
+            .try_into()
+            .map_err(|_| anyhow!("header read returned an unexpected number of bytes"))?;
         Ok(parse_cartridge_header(&header))
     }
 
@@ -199,39 +250,25 @@ impl GbxcartDevice {
 
             for bank in 0..bank_count {
                 let bank = u8::try_from(bank).context("SRAM bank index overflowed u8")?;
+                debug_log(&format!("dumping SRAM bank {bank} of {}", bank_count - 1));
                 self.set_bank(0x4000, bank)
                     .with_context(|| format!("failed to select SRAM bank {bank}"))?;
-                self.send_number(SET_START_ADDRESS_COMMAND, 0xA000)
-                    .with_context(|| format!("failed to set SRAM read start for bank {bank}"))?;
-                self.send_command(READ_ROM_RAM_COMMAND)
-                    .with_context(|| format!("failed to start SRAM streaming for bank {bank}"))?;
-
-                let bank_read_result = (|| -> Result<()> {
-                    let block_count = bank_size / STREAM_BLOCK_SIZE;
-                    let mut block = [0_u8; STREAM_BLOCK_SIZE];
-                    for block_index in 0..block_count {
-                        self.read_exact_into(&mut block).with_context(|| {
-                            format!("failed to read block {block_index} from SRAM bank {bank}")
+                for block_offset in (0..bank_size).step_by(STREAM_BLOCK_SIZE) {
+                    let block = self
+                        .read_dmg_ram(block_offset as u16, STREAM_BLOCK_SIZE)
+                        .with_context(|| {
+                            format!(
+                                "failed to read block {} from SRAM bank {bank}",
+                                block_offset / STREAM_BLOCK_SIZE
+                            )
                         })?;
-                        file.write_all(&block).with_context(|| {
-                            format!("failed to write block {block_index} for SRAM bank {bank}")
-                        })?;
-                        if block_index + 1 != block_count {
-                            self.send_command(CONTINUE_STREAM_COMMAND)
-                                .with_context(|| {
-                                    format!(
-                                        "failed to request block {} from SRAM bank {bank}",
-                                        block_index + 1
-                                    )
-                                })?;
-                        }
-                    }
-                    Ok(())
-                })();
-
-                self.stop_stream()
-                    .with_context(|| format!("failed to stop SRAM streaming for bank {bank}"))?;
-                bank_read_result?;
+                    file.write_all(&block).with_context(|| {
+                        format!(
+                            "failed to write block {} for SRAM bank {bank}",
+                            block_offset / STREAM_BLOCK_SIZE
+                        )
+                    })?;
+                }
             }
 
             Ok(())
@@ -244,6 +281,7 @@ impl GbxcartDevice {
     }
 
     fn try_connect(port_name: &str, baud_rate: u32, timeout: Duration) -> Result<Self> {
+        debug_log(&format!("opening {port_name} at {baud_rate} baud"));
         let mut port = serialport::new(port_name, baud_rate)
             .timeout(timeout)
             .open()
@@ -251,8 +289,14 @@ impl GbxcartDevice {
 
         clear_buffers(&mut *port)
             .with_context(|| format!("failed to clear serial buffers on {port_name}"))?;
+        debug_log(&format!("sending stop stream to {port_name} at {baud_rate}"));
         send_command(&mut *port, STOP_STREAM_COMMAND)
             .with_context(|| format!("failed to reset the device state on {port_name}"))?;
+        clear_buffers(&mut *port).ok();
+
+        debug_log(&format!("sending reset avr to {port_name} at {baud_rate}"));
+        let _ = send_command(&mut *port, RESET_AVR_COMMAND);
+        thread::sleep(Duration::from_millis(500));
         clear_buffers(&mut *port).ok();
 
         let cart_mode = request_value(&mut *port, CART_MODE_COMMAND)
@@ -263,6 +307,10 @@ impl GbxcartDevice {
             .with_context(|| format!("failed to read PCB version from {port_name}"))?;
         let firmware_version = request_value(&mut *port, READ_FIRMWARE_VERSION_COMMAND)
             .with_context(|| format!("failed to read firmware version from {port_name}"))?;
+
+        debug_log(&format!(
+            "probe {port_name} @ {baud_rate}: cart_mode=0x{cart_mode:02X} pcb=0x{pcb_version:02X} fw=0x{firmware_version:02X}"
+        ));
 
         Ok(Self {
             port_name: port_name.to_owned(),
@@ -284,24 +332,14 @@ impl GbxcartDevice {
         send_command(&mut *self.port, command)
     }
 
-    fn send_number(&mut self, command: u8, value: u32) -> Result<()> {
-        send_number(&mut *self.port, command, value)
-    }
-
     fn request_value(&mut self, command: u8) -> Result<u8> {
         request_value(&mut *self.port, command)
     }
 
     fn set_bank(&mut self, address: u16, bank: u8) -> Result<()> {
-        self.send_number(SET_BANK_COMMAND, u32::from(address))?;
-        thread::sleep(Duration::from_millis(5));
-        self.send_number(SET_BANK_COMMAND, u32::from(bank))?;
+        self.write_dmg_cart(address, bank)?;
         thread::sleep(Duration::from_millis(5));
         Ok(())
-    }
-
-    fn stop_stream(&mut self) -> Result<()> {
-        self.send_command(STOP_STREAM_COMMAND)
     }
 
     fn read_exact_into(&mut self, buffer: &mut [u8]) -> Result<()> {
@@ -318,18 +356,109 @@ impl GbxcartDevice {
         }
         Ok(())
     }
-}
 
-fn ordered_port_names(
-    ports: &[serialport::SerialPortInfo],
-    preferred_port: Option<&str>,
-) -> Vec<String> {
-    let mut names = Vec::with_capacity(ports.len());
-    if let Some(preferred_port) = preferred_port {
-        if ports.iter().any(|port| port.port_name == preferred_port) {
-            names.push(preferred_port.to_owned());
+    fn set_fw_variable(&mut self, size: u8, key: u32, value: u32) -> Result<()> {
+        let mut buffer = Vec::with_capacity(10);
+        buffer.push(SET_VARIABLE_COMMAND);
+        buffer.push(size);
+        buffer.extend_from_slice(&key.to_be_bytes());
+        buffer.extend_from_slice(&value.to_be_bytes());
+        debug_log(&format!(
+            "set variable size={size} key=0x{key:08X} value=0x{value:08X}"
+        ));
+        self.port
+            .write_all(&buffer)
+            .context("failed to write firmware variable command")?;
+        self.port
+            .flush()
+            .context("failed to flush firmware variable command")?;
+        self.read_ack("set firmware variable")?;
+        Ok(())
+    }
+
+    fn write_dmg_cart(&mut self, address: u16, value: u8) -> Result<()> {
+        let mut buffer = Vec::with_capacity(6);
+        buffer.push(DMG_CART_WRITE_COMMAND);
+        buffer.extend_from_slice(&u32::from(address).to_be_bytes());
+        buffer.push(value);
+        debug_log(&format!("write dmg cart address=0x{address:04X} value=0x{value:02X}"));
+        self.port
+            .write_all(&buffer)
+            .context("failed to write DMG cart write command")?;
+        self.port
+            .flush()
+            .context("failed to flush DMG cart write command")?;
+        self.read_ack("DMG cart write")?;
+        Ok(())
+    }
+
+    fn read_dmg_rom(&mut self, address: u32, length: usize) -> Result<Vec<u8>> {
+        debug_log(&format!("read dmg rom address=0x{address:08X} length=0x{length:X}"));
+        self.set_fw_variable(2, FW_VAR_TRANSFER_SIZE, length as u32)?;
+        self.set_fw_variable(4, FW_VAR_ADDRESS, address)?;
+        self.set_fw_variable(1, FW_VAR_DMG_ACCESS_MODE, DMG_ACCESS_MODE_ROM_READ)?;
+        self.send_command(DMG_CART_READ_COMMAND)
+            .context("failed to start DMG ROM read")?;
+
+        let mut buffer = vec![0_u8; length];
+        self.read_exact_into(&mut buffer)
+            .context("failed to read DMG ROM bytes")?;
+        Ok(buffer)
+    }
+
+    fn read_dmg_ram(&mut self, address: u16, length: usize) -> Result<Vec<u8>> {
+        debug_log_verbose(&format!("read dmg ram address=0x{address:04X} length=0x{length:X}"));
+        self.set_fw_variable(2, FW_VAR_TRANSFER_SIZE, length as u32)?;
+        self.set_fw_variable(4, FW_VAR_ADDRESS, u32::from(0xA000_u16 + address))?;
+        self.set_fw_variable(1, FW_VAR_DMG_ACCESS_MODE, DMG_ACCESS_MODE_RAM_READ)?;
+        self.set_fw_variable(1, FW_VAR_DMG_READ_CS_PULSE, 1)?;
+        self.send_command(DMG_CART_READ_COMMAND)
+            .context("failed to start DMG RAM read")?;
+
+        let read_result = (|| -> Result<Vec<u8>> {
+            let mut buffer = vec![0_u8; length];
+            self.read_exact_into(&mut buffer)
+                .context("failed to read DMG RAM bytes")?;
+            Ok(buffer)
+        })();
+
+        self.set_fw_variable(1, FW_VAR_DMG_READ_CS_PULSE, 0)
+            .context("failed to restore DMG read CS pulse setting")?;
+        read_result
+    }
+
+    fn read_ack(&mut self, context: &str) -> Result<()> {
+        if self.info.firmware_version < 12 {
+            return Ok(());
+        }
+
+        let mut ack = [0_u8; 1];
+        self.read_exact_into(&mut ack)
+            .with_context(|| format!("failed to read ACK for {context}"))?;
+        debug_log(&format!("ack for {context}: 0x{:02X}", ack[0]));
+        match ack[0] {
+            0x01 | 0x03 => Ok(()),
+            other => bail!("unexpected ACK 0x{other:02X} for {context}"),
         }
     }
+
+    fn send_command_expect_ack(&mut self, command: u8, context: &str) -> Result<()> {
+        self.send_command(command)?;
+        self.read_ack(context)
+    }
+}
+
+pub fn set_debug_logging(enabled: bool) {
+    DEBUG_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+#[allow(dead_code)]
+pub fn set_verbose_debug_logging(enabled: bool) {
+    DEBUG_VERBOSE_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+fn ordered_port_names(ports: &[serialport::SerialPortInfo]) -> Vec<String> {
+    let mut names = Vec::with_capacity(ports.len());
 
     for port in ports {
         if names.iter().all(|name| name != &port.port_name) {
@@ -341,22 +470,16 @@ fn ordered_port_names(
 }
 
 fn clear_buffers(port: &mut dyn SerialPort) -> Result<()> {
+    debug_log("clearing serial buffers");
     port.clear(ClearBuffer::All)
         .context("serial clear operation failed")
 }
 
 fn send_command(port: &mut dyn SerialPort, command: u8) -> Result<()> {
+    debug_log(&format!("send command 0x{command:02X}"));
     port.write_all(&[command])
         .context("failed to write serial command")?;
     port.flush().context("failed to flush serial command")
-}
-
-fn send_number(port: &mut dyn SerialPort, command: u8, value: u32) -> Result<()> {
-    let message = format!("{}{value:x}\0", char::from(command));
-    port.write_all(message.as_bytes())
-        .context("failed to write serial numeric command")?;
-    port.flush()
-        .context("failed to flush serial numeric command")
 }
 
 fn request_value(port: &mut dyn SerialPort, command: u8) -> Result<u8> {
@@ -365,13 +488,38 @@ fn request_value(port: &mut dyn SerialPort, command: u8) -> Result<u8> {
     loop {
         match port.read(&mut value) {
             Ok(0) => continue,
-            Ok(_) => return Ok(value[0]),
+            Ok(_) => {
+                debug_log(&format!("response to 0x{command:02X}: 0x{:02X}", value[0]));
+                return Ok(value[0]);
+            }
             Err(error) if error.kind() == ErrorKind::TimedOut => {
                 return Err(error).context("timed out while waiting for a probe response");
             }
             Err(error) => return Err(error).context("failed while reading a probe response"),
         }
     }
+}
+
+fn debug_log(message: &str) {
+    if DEBUG_ENABLED.load(Ordering::Relaxed) || env::var_os("GB_CAMERA_DEBUG").is_some() {
+        eprintln!("[gb-camera-debug] {message}");
+    }
+}
+
+fn debug_log_verbose(message: &str) {
+    if DEBUG_VERBOSE_ENABLED.load(Ordering::Relaxed)
+        || env::var_os("GB_CAMERA_DEBUG_VERBOSE").is_some()
+    {
+        eprintln!("[gb-camera-debug] {message}");
+    }
+}
+
+fn format_bytes(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn parse_cartridge_header(bytes: &[u8; HEADER_READ_LENGTH]) -> CartridgeHeader {

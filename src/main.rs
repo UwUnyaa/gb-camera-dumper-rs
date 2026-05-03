@@ -12,15 +12,7 @@ fn main() -> Result<()> {
 
     match command {
         Command::Ports => list_ports(),
-        Command::DumpSram {
-            port,
-            output,
-            timeout_ms,
-        } => dump_sram(DumpSramOptions {
-            port,
-            output,
-            timeout_ms,
-        }),
+        Command::DumpSram { output, debug } => dump_sram(DumpSramOptions { output, debug }),
     }
 }
 
@@ -40,8 +32,9 @@ fn list_ports() -> Result<()> {
 }
 
 fn dump_sram(options: DumpSramOptions) -> Result<()> {
-    let (mut device, attempts) =
-        GbxcartDevice::autodetect(options.port.as_deref(), options.timeout())?;
+    gbxcart::set_debug_logging(options.debug);
+
+    let (mut device, attempts) = GbxcartDevice::autodetect()?;
 
     if !attempts.is_empty() {
         eprintln!("Probe attempts before success:");
@@ -63,7 +56,11 @@ fn dump_sram(options: DumpSramOptions) -> Result<()> {
         device.info().cartridge_mode == CartridgeMode::GameBoy,
         "the attached GBxCart RW did not enter Game Boy mode"
     );
-    let header = device.read_cartridge_header()?;
+    let mut header = device.read_cartridge_header()?;
+    if header_looks_uninitialized(&header) {
+        device.prepare_for_game_boy_camera()?;
+        header = device.read_cartridge_header()?;
+    }
 
     println!(
         "Detected title {:?}, cartridge type 0x{:02X}, ROM size code 0x{:02X}, RAM size code 0x{:02X}.",
@@ -99,6 +96,13 @@ fn dump_sram(options: DumpSramOptions) -> Result<()> {
         options.output.display()
     );
     Ok(())
+}
+
+fn header_looks_uninitialized(header: &gbxcart::CartridgeHeader) -> bool {
+    header.title.is_empty()
+        && matches!(header.cartridge_type, 0x00 | 0xFF)
+        && header.rom_size_code == header.cartridge_type
+        && header.ram_size_code == header.cartridge_type
 }
 
 fn describe_port(port: &serialport::SerialPortInfo) -> String {

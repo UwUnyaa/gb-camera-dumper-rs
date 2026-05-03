@@ -1,5 +1,4 @@
-# Top-level keys map directly to src/config.rs::Config.
-# Remove port to require it from a different file or add it here for probe.
-port = "/dev/ttyUSB0"
-baud_rate = 1_000_000
-timeout_ms = 1_000
+# Example values matching the current dump-sram options.
+# The program does not load this file automatically yet.
+output = "gb-camera.sav"
+debug = false
