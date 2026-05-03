@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 pub(crate) mod camera {
     pub const CARTRIDGE_TITLE: &str = "GAMEBOYCAMERA";
     pub const JAPANESE_CARTRIDGE_TITLE: &str = "POCKETCAMERA";
