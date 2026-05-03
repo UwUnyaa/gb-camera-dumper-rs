@@ -2,6 +2,7 @@ mod camera;
 mod config;
 mod constants;
 mod gbxcart;
+mod photo;
 
 use anyhow::{Context, Result, bail, ensure};
 use config::{Command, DumpSramOptions};
@@ -107,7 +108,7 @@ fn dump_sram(options: DumpSramOptions) -> Result<()> {
             options.output.display()
         )
     })?;
-    let photo_count = camera::dump_active_photos_as_pngs(&sram, &photo_output_dir)
+    let photo_count = photo::dump_active_photos_as_pngs(&sram, &photo_output_dir)
         .with_context(|| format!("failed to export photos to {}", photo_output_dir.display()))?;
     println!(
         "Exported {photo_count} undeleted photos to {}.",
