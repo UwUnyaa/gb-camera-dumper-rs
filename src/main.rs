@@ -1,3 +1,4 @@
+mod camera;
 mod config;
 
 use anyhow::{Context, Result};
