@@ -1,0 +1,3 @@
+#+TITLE: gb-camera-dumper-rs
+
+This is a work in progress project that is meant to provide a simple CLI tool to dump photos from a game boy camera.
