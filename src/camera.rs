@@ -1,10 +1,13 @@
-//! SRAM layout for the retail Game Boy Camera / Pocket Camera cartridges.
-//!
-//! Layout sources:
-//! - Pan Docs, "Game Boy Camera" for the cartridge RAM size and banking model:
-//!   https://gbdev.io/pandocs/Gameboy_Camera.html
-//! - Raphael Boichot, "All you want to know about the Game Boy Camera save format !"
-//!   for the reverse-engineered absolute SRAM offsets.
+// Cartrige metadata
+pub const CARTRIDGE_TITLE: &str = "GAMEBOYCAMERA";
+
+// SRAM layout for the retail Game Boy Camera / Pocket Camera cartridges.
+//
+// Layout sources:
+// - Pan Docs, "Game Boy Camera" for the cartridge RAM size and banking model:
+//   https://gbdev.io/pandocs/Gameboy_Camera.html
+// - Raphael Boichot, "All you want to know about the Game Boy Camera save format !"
+//   for the reverse-engineered absolute SRAM offsets.
 
 pub const SRAM_SIZE: usize = 0x20_000;
 pub const SRAM_BANK_SIZE: usize = 0x2_000;
