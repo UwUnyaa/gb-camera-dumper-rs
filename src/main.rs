@@ -6,8 +6,10 @@ mod gbxcart;
 use anyhow::{Context, Result, bail, ensure};
 use config::{Command, DumpSramOptions};
 use constants::camera as camera_constants;
+use constants::config::DEFAULT_PHOTO_OUTPUT_DIR;
 use gbxcart::{CartridgeMode, GbxcartDevice};
 use serialport::SerialPortType;
+use std::{fs, path::Path};
 
 fn main() -> Result<()> {
     let command = config::parse();
@@ -97,7 +99,30 @@ fn dump_sram(options: DumpSramOptions) -> Result<()> {
         camera_constants::SRAM_SIZE,
         options.output.display()
     );
+
+    let photo_output_dir = photo_output_dir(&options.output);
+    let sram = fs::read(&options.output).with_context(|| {
+        format!(
+            "failed to read dumped SRAM from {}",
+            options.output.display()
+        )
+    })?;
+    let photo_count = camera::dump_active_photos_as_pngs(&sram, &photo_output_dir)
+        .with_context(|| format!("failed to export photos to {}", photo_output_dir.display()))?;
+    println!(
+        "Exported {photo_count} undeleted photos to {}.",
+        photo_output_dir.display()
+    );
+
     Ok(())
+}
+
+fn photo_output_dir(output_path: &Path) -> std::path::PathBuf {
+    output_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
+        .join(DEFAULT_PHOTO_OUTPUT_DIR)
 }
 
 fn header_looks_uninitialized(header: &gbxcart::CartridgeHeader) -> bool {

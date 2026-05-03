@@ -7,7 +7,9 @@ dump data from a Game Boy Camera through a GBxCart RW.
 
 The current proof of concept auto-detects a GBxCart RW on the available serial
 ports, checks that the inserted cartridge ROM title is one of these supported
-Game Boy Camera titles, and dumps the full 128 KiB SRAM image to a file:
+Game Boy Camera titles, dumps the full 128 KiB SRAM image to a file, and
+exports every undeleted photo as a PNG into =gb-camera-photos/= next to the
+SRAM dump:
 
 #+begin_example
 GAMEBOYCAMERA
@@ -18,11 +20,8 @@ POCKETCAMERA
 cargo run -- dump-sram --output gb-camera.sav
 #+end_example
 
-If you already know the serial port, you can try it first:
-
-#+begin_example
-cargo run -- dump-sram --port /dev/ttyACM0 --output gb-camera.sav
-#+end_example
+For now, the PNG export directory is wiped clean on each run so test dumps do
+not leave stale images behind.
 
 To inspect the serial ports and USB metadata first:
 

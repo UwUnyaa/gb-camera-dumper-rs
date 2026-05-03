@@ -26,6 +26,7 @@ pub(crate) mod camera {
 
 pub(crate) mod config {
     pub const DEFAULT_OUTPUT_PATH: &str = "gb-camera.sav";
+    pub const DEFAULT_PHOTO_OUTPUT_DIR: &str = "gb-camera-photos";
 }
 
 pub(crate) mod gbxcart {
