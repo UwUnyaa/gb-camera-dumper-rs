@@ -1,7 +1,6 @@
+use crate::constants::config::DEFAULT_OUTPUT_PATH;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-
-const DEFAULT_OUTPUT_PATH: &str = "gb-camera.sav";
 
 #[derive(Debug, Parser)]
 #[command(

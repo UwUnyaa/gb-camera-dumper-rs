@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
+use crate::constants::camera::*;
+
 // Cartridge metadata
-pub const CARTRIDGE_TITLE: &str = "GAMEBOYCAMERA";
-pub const JAPANESE_CARTRIDGE_TITLE: &str = "POCKETCAMERA";
 
 // SRAM layout for the retail Game Boy Camera / Pocket Camera cartridges.
 //
@@ -11,26 +11,6 @@ pub const JAPANESE_CARTRIDGE_TITLE: &str = "POCKETCAMERA";
 //   https://gbdev.io/pandocs/Gameboy_Camera.html
 // - Raphael Boichot, "All you want to know about the Game Boy Camera save format !"
 //   for the reverse-engineered absolute SRAM offsets.
-
-pub const SRAM_SIZE: usize = 0x20_000;
-pub const SRAM_BANK_SIZE: usize = 0x2_000;
-pub const SRAM_BANK_COUNT: usize = 16;
-pub const PHOTO_SLOT_COUNT: usize = 30;
-
-pub const CAPTURE_BUFFER_SIZE: usize = 0x1000;
-pub const GENERAL_DATA_SIZE: usize = 0x00D9;
-pub const STATE_VECTOR_SIZE: usize = 0x0025;
-pub const GAME_FACE_SIZE: usize = 0x0E00;
-pub const CAMERA_TAG_SIZE: usize = 0x0004;
-pub const PHOTO_SLOT_SIZE: usize = 0x1000;
-
-pub const PHOTO_TILE_DATA_SIZE: usize = 0x0E00;
-pub const PHOTO_THUMBNAIL_SIZE: usize = 0x0100;
-pub const PICTURE_OWNER_METADATA_SIZE: usize = 0x005C;
-pub const PICTURE_OWNER_METADATA_ECHO_SIZE: usize = 0x005C;
-pub const CAMERA_OWNER_METADATA_SIZE: usize = 0x0019;
-pub const CAMERA_OWNER_METADATA_ECHO_SIZE: usize = 0x0019;
-pub const PHOTO_SLOT_TRAILER_SIZE: usize = 0x0016;
 
 pub fn is_game_boy_camera_title(title: &str) -> bool {
     matches!(title, CARTRIDGE_TITLE | JAPANESE_CARTRIDGE_TITLE)

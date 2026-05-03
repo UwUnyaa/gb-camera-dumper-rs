@@ -1,3 +1,4 @@
+use crate::constants::gbxcart::*;
 use anyhow::{Context, Result, anyhow, bail};
 use serialport::{ClearBuffer, SerialPort};
 use std::env;
@@ -5,48 +6,6 @@ use std::io::{ErrorKind, Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
-
-const PROBE_TIMEOUT_MS: u64 = 1_000;
-const BAUD_RATES: [u32; 3] = [1_000_000, 1_700_000, 1_500_000];
-const STREAM_BLOCK_SIZE: usize = 64;
-const HEADER_READ_LENGTH: usize = 0x180;
-const CART_MODE_COMMAND: u8 = b'C';
-const READ_PCB_VERSION_COMMAND: u8 = b'h';
-const READ_FIRMWARE_VERSION_COMMAND: u8 = b'V';
-const GB_CART_MODE_COMMAND: u8 = b'G';
-const STOP_STREAM_COMMAND: u8 = b'0';
-const VOLTAGE_5V_COMMAND: u8 = b'5';
-const QUERY_CART_POWER_COMMAND: u8 = b']';
-const POWER_CART_ON_COMMAND: u8 = b'/';
-const RESET_AVR_COMMAND: u8 = b'*';
-const CART_POWER_ON_BINARY_COMMAND: u8 = 0xF2;
-const QUERY_CART_POWER_BINARY_COMMAND: u8 = 0xF4;
-const SET_MODE_DMG_COMMAND: u8 = 0xA3;
-const SET_VOLTAGE_5V_BINARY_COMMAND: u8 = 0xA5;
-const SET_VARIABLE_COMMAND: u8 = 0xA6;
-const DISABLE_PULLUPS_COMMAND: u8 = 0xAC;
-const DMG_CART_READ_COMMAND: u8 = 0xB1;
-const DMG_CART_WRITE_COMMAND: u8 = 0xB2;
-const DMG_MBC_RESET_COMMAND: u8 = 0xB4;
-
-const CART_MODE_GB: u8 = 1;
-const CART_MODE_GBA: u8 = 2;
-const PCB_1_3: u8 = 4;
-const PCB_1_4: u8 = 5;
-const PCB_GBXMAS: u8 = 90;
-const FW_VAR_ADDRESS: u32 = 0x00;
-const FW_VAR_TRANSFER_SIZE: u32 = 0x00;
-const FW_VAR_CART_MODE: u32 = 0x00;
-const FW_VAR_DMG_ACCESS_MODE: u32 = 0x01;
-const FW_VAR_DMG_READ_CS_PULSE: u32 = 0x08;
-const DMG_ACCESS_MODE_ROM_READ: u32 = 0x01;
-const DMG_ACCESS_MODE_RAM_READ: u32 = 0x03;
-
-const NINTENDO_LOGO: [u8; 48] = [
-    0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
-    0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E, 0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
-    0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
-];
 
 static DEBUG_ENABLED: AtomicBool = AtomicBool::new(false);
 static DEBUG_VERBOSE_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -208,7 +167,10 @@ impl GbxcartDevice {
             .context("failed to confirm Game Boy cart mode after switching")?
             .try_into()
             .map_err(|mode: u8| anyhow!("unexpected cart mode response 0x{mode:02X}"))?;
-        debug_log(&format!("confirmed cart mode after prep: {:?}", self.info.cartridge_mode));
+        debug_log(&format!(
+            "confirmed cart mode after prep: {:?}",
+            self.info.cartridge_mode
+        ));
 
         Ok(())
     }
@@ -289,7 +251,9 @@ impl GbxcartDevice {
 
         clear_buffers(&mut *port)
             .with_context(|| format!("failed to clear serial buffers on {port_name}"))?;
-        debug_log(&format!("sending stop stream to {port_name} at {baud_rate}"));
+        debug_log(&format!(
+            "sending stop stream to {port_name} at {baud_rate}"
+        ));
         send_command(&mut *port, STOP_STREAM_COMMAND)
             .with_context(|| format!("failed to reset the device state on {port_name}"))?;
         clear_buffers(&mut *port).ok();
@@ -381,7 +345,9 @@ impl GbxcartDevice {
         buffer.push(DMG_CART_WRITE_COMMAND);
         buffer.extend_from_slice(&u32::from(address).to_be_bytes());
         buffer.push(value);
-        debug_log(&format!("write dmg cart address=0x{address:04X} value=0x{value:02X}"));
+        debug_log(&format!(
+            "write dmg cart address=0x{address:04X} value=0x{value:02X}"
+        ));
         self.port
             .write_all(&buffer)
             .context("failed to write DMG cart write command")?;
@@ -393,7 +359,9 @@ impl GbxcartDevice {
     }
 
     fn read_dmg_rom(&mut self, address: u32, length: usize) -> Result<Vec<u8>> {
-        debug_log(&format!("read dmg rom address=0x{address:08X} length=0x{length:X}"));
+        debug_log(&format!(
+            "read dmg rom address=0x{address:08X} length=0x{length:X}"
+        ));
         self.set_fw_variable(2, FW_VAR_TRANSFER_SIZE, length as u32)?;
         self.set_fw_variable(4, FW_VAR_ADDRESS, address)?;
         self.set_fw_variable(1, FW_VAR_DMG_ACCESS_MODE, DMG_ACCESS_MODE_ROM_READ)?;
@@ -407,7 +375,9 @@ impl GbxcartDevice {
     }
 
     fn read_dmg_ram(&mut self, address: u16, length: usize) -> Result<Vec<u8>> {
-        debug_log_verbose(&format!("read dmg ram address=0x{address:04X} length=0x{length:X}"));
+        debug_log_verbose(&format!(
+            "read dmg ram address=0x{address:04X} length=0x{length:X}"
+        ));
         self.set_fw_variable(2, FW_VAR_TRANSFER_SIZE, length as u32)?;
         self.set_fw_variable(4, FW_VAR_ADDRESS, u32::from(0xA000_u16 + address))?;
         self.set_fw_variable(1, FW_VAR_DMG_ACCESS_MODE, DMG_ACCESS_MODE_RAM_READ)?;

@@ -1,9 +1,11 @@
 mod camera;
 mod config;
+mod constants;
 mod gbxcart;
 
 use anyhow::{Context, Result, bail, ensure};
 use config::{Command, DumpSramOptions};
+use constants::camera as camera_constants;
 use gbxcart::{CartridgeMode, GbxcartDevice};
 use serialport::SerialPortType;
 
@@ -85,14 +87,14 @@ fn dump_sram(options: DumpSramOptions) -> Result<()> {
     device
         .dump_sram(
             &options.output,
-            camera::SRAM_BANK_COUNT,
-            camera::SRAM_BANK_SIZE,
+            camera_constants::SRAM_BANK_COUNT,
+            camera_constants::SRAM_BANK_SIZE,
         )
         .with_context(|| format!("failed to dump SRAM to {}", options.output.display()))?;
 
     println!(
         "Wrote {} bytes of SRAM to {}.",
-        camera::SRAM_SIZE,
+        camera_constants::SRAM_SIZE,
         options.output.display()
     );
     Ok(())
