@@ -18,13 +18,14 @@ const TILE_BYTES: usize = 16;
 const TILES_PER_ROW: usize = PHOTO_WIDTH / TILE_EDGE;
 const GRAYSCALE_PALETTE: [u8; 4] = [0xFF, 0xAA, 0x55, 0x00];
 
-pub fn dump_active_photos_as_pngs(sram: &[u8], output_dir: &Path) -> Result<usize> {
+pub fn dump_active_photos_as_pngs(sram: &[u8], output_dir: &Path, scale: usize) -> Result<usize> {
     ensure!(
         sram.len() == SRAM_SIZE,
         "expected a {}-byte Game Boy Camera SRAM dump, got {} bytes",
         SRAM_SIZE,
         sram.len()
     );
+    ensure!(scale > 0, "photo scale must be at least 1");
 
     if output_dir.exists() {
         // For testing, start each run from a clean export directory so stale PNGs
@@ -50,7 +51,7 @@ pub fn dump_active_photos_as_pngs(sram: &[u8], output_dir: &Path) -> Result<usiz
             album_slot = album_slot_index + 1,
             photo_slot = photo_slot_index + 1,
         ));
-        dump_photo_slot_as_png(sram, *photo_slot_index, &output_path)?;
+        dump_photo_slot_as_png(sram, *photo_slot_index, &output_path, scale)?;
     }
 
     Ok(active_photos.len())
@@ -79,14 +80,20 @@ fn active_album_photo_slots(sram: &[u8]) -> Result<Vec<(usize, usize)>> {
     Ok(active_photos)
 }
 
-fn dump_photo_slot_as_png(sram: &[u8], photo_slot_index: usize, output_path: &Path) -> Result<()> {
+fn dump_photo_slot_as_png(
+    sram: &[u8],
+    photo_slot_index: usize,
+    output_path: &Path,
+    scale: usize,
+) -> Result<()> {
     let image_tiles = photo_slot_image_tiles(sram, photo_slot_index)?;
     let pixels = decode_photo_tiles(image_tiles);
+    let scaled_pixels = scale_grayscale_pixels(&pixels, PHOTO_WIDTH, PHOTO_HEIGHT, scale);
     write_grayscale_png(
         output_path,
-        &pixels,
-        PHOTO_WIDTH as u32,
-        PHOTO_HEIGHT as u32,
+        &scaled_pixels,
+        scaled_dimension(PHOTO_WIDTH, scale)?,
+        scaled_dimension(PHOTO_HEIGHT, scale)?,
     )
 }
 
@@ -133,6 +140,39 @@ fn decode_photo_tiles(tile_data: &[u8]) -> Vec<u8> {
     pixels
 }
 
+fn scale_grayscale_pixels(pixels: &[u8], width: usize, height: usize, scale: usize) -> Vec<u8> {
+    if scale == 1 {
+        return pixels.to_vec();
+    }
+
+    let scaled_width = width * scale;
+    let mut scaled_pixels = vec![0; scaled_width * height * scale];
+
+    for y in 0..height {
+        let source_row = &pixels[y * width..(y + 1) * width];
+
+        for row_repeat in 0..scale {
+            let scaled_row_start = (y * scale + row_repeat) * scaled_width;
+            let scaled_row = &mut scaled_pixels[scaled_row_start..scaled_row_start + scaled_width];
+
+            for (x, &pixel) in source_row.iter().enumerate() {
+                let scaled_x = x * scale;
+                scaled_row[scaled_x..scaled_x + scale].fill(pixel);
+            }
+        }
+    }
+
+    scaled_pixels
+}
+
+fn scaled_dimension(dimension: usize, scale: usize) -> Result<u32> {
+    dimension
+        .checked_mul(scale)
+        .context("scaled photo dimensions overflowed")?
+        .try_into()
+        .context("scaled photo dimensions did not fit in PNG size fields")
+}
+
 fn write_grayscale_png(output_path: &Path, pixels: &[u8], width: u32, height: u32) -> Result<()> {
     let file = File::create(output_path)
         .with_context(|| format!("failed to create {}", output_path.display()))?;
@@ -153,8 +193,10 @@ fn write_grayscale_png(output_path: &Path, pixels: &[u8], width: u32, height: u3
 #[cfg(test)]
 mod tests {
     use super::*;
+    use png::Decoder;
     use std::{
         fs,
+        io::Cursor,
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -205,13 +247,17 @@ mod tests {
         let stale_file = output_dir.join("stale.txt");
         fs::write(&stale_file, b"stale").unwrap();
 
-        let photo_count = dump_active_photos_as_pngs(&sram, &output_dir).unwrap();
+        let photo_count = dump_active_photos_as_pngs(&sram, &output_dir, 2).unwrap();
         let png_path = output_dir.join("album-01-slot-01.png");
         let png_bytes = fs::read(&png_path).unwrap();
+        let decoder = Decoder::new(Cursor::new(&png_bytes));
+        let reader = decoder.read_info().unwrap();
 
         assert_eq!(photo_count, 1);
         assert!(!stale_file.exists());
         assert_eq!(&png_bytes[..8], b"\x89PNG\r\n\x1a\n");
+        assert_eq!(reader.info().width, (PHOTO_WIDTH * 2) as u32);
+        assert_eq!(reader.info().height, (PHOTO_HEIGHT * 2) as u32);
 
         fs::remove_dir_all(output_dir).unwrap();
     }

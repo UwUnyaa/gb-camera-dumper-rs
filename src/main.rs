@@ -12,6 +12,8 @@ use gbxcart::{CartridgeMode, GbxcartDevice};
 use serialport::SerialPortType;
 use std::{fs, path::Path};
 
+const PHOTO_EXPORT_SCALE: usize = 2;
+
 fn main() -> Result<()> {
     let command = config::parse();
 
@@ -108,8 +110,11 @@ fn dump_sram(options: DumpSramOptions) -> Result<()> {
             options.output.display()
         )
     })?;
-    let photo_count = photo::dump_active_photos_as_pngs(&sram, &photo_output_dir)
-        .with_context(|| format!("failed to export photos to {}", photo_output_dir.display()))?;
+    let photo_count =
+        photo::dump_active_photos_as_pngs(&sram, &photo_output_dir, PHOTO_EXPORT_SCALE)
+            .with_context(|| {
+                format!("failed to export photos to {}", photo_output_dir.display())
+            })?;
     println!(
         "Exported {photo_count} undeleted photos to {}.",
         photo_output_dir.display()
