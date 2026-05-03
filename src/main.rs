@@ -1,19 +1,26 @@
 mod camera;
 mod config;
+mod gbxcart;
 
-use anyhow::{Context, Result};
-use config::{Command, Config};
-use serialport::{ClearBuffer, SerialPortType};
-use std::io::{ErrorKind, Read, Write};
-use std::thread;
-use std::time::Duration;
+use anyhow::{Context, Result, bail, ensure};
+use config::{Command, DumpSramOptions};
+use gbxcart::{CartridgeMode, GbxcartDevice};
+use serialport::SerialPortType;
 
 fn main() -> Result<()> {
-    let (command, config) = config::parse()?;
+    let command = config::parse();
 
     match command {
         Command::Ports => list_ports(),
-        Command::Probe { request } => probe_device(&config, &request),
+        Command::DumpSram {
+            port,
+            output,
+            timeout_ms,
+        } => dump_sram(DumpSramOptions {
+            port,
+            output,
+            timeout_ms,
+        }),
     }
 }
 
@@ -32,52 +39,65 @@ fn list_ports() -> Result<()> {
     Ok(())
 }
 
-fn probe_device(config: &Config, request: &str) -> Result<()> {
-    let port_name = config
-        .port
-        .as_deref()
-        .context("no serial port configured; set port in gb-camera-dumper.toml")?;
+fn dump_sram(options: DumpSramOptions) -> Result<()> {
+    let (mut device, attempts) =
+        GbxcartDevice::autodetect(options.port.as_deref(), options.timeout())?;
 
-    let mut port = serialport::new(port_name, config.baud_rate)
-        .timeout(config.timeout())
-        .open()
-        .with_context(|| format!("failed to open serial port {port_name}"))?;
-
-    port.clear(ClearBuffer::All)
-        .with_context(|| format!("failed to clear buffers on {port_name}"))?;
-    port.write_all(request.as_bytes())
-        .with_context(|| format!("failed to write probe request to {port_name}"))?;
-    port.flush()
-        .with_context(|| format!("failed to flush probe request to {port_name}"))?;
-
-    thread::sleep(Duration::from_millis(50));
-
-    let mut response = Vec::new();
-    let mut buffer = [0_u8; 256];
-
-    loop {
-        match port.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(count) => response.extend_from_slice(&buffer[..count]),
-            Err(error) if error.kind() == ErrorKind::TimedOut => break,
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("failed while reading from {port_name}"));
-            }
+    if !attempts.is_empty() {
+        eprintln!("Probe attempts before success:");
+        for attempt in attempts {
+            eprintln!("  {attempt}");
         }
     }
 
-    println!("Opened {port_name} at {} baud.", config.baud_rate);
-    if response.is_empty() {
-        println!(
-            "Sent {:?}, but no bytes were returned before timeout.",
-            request
+    println!(
+        "Connected to {} at {} baud (PCB {}, firmware {}).",
+        device.port_name(),
+        device.info().baud_rate,
+        device.info().pcb_version,
+        device.info().firmware_version
+    );
+
+    device.prepare_for_game_boy_camera()?;
+    ensure!(
+        device.info().cartridge_mode == CartridgeMode::GameBoy,
+        "the attached GBxCart RW did not enter Game Boy mode"
+    );
+    let header = device.read_cartridge_header()?;
+
+    println!(
+        "Detected title {:?}, cartridge type 0x{:02X}, ROM size code 0x{:02X}, RAM size code 0x{:02X}.",
+        header.title, header.cartridge_type, header.rom_size_code, header.ram_size_code
+    );
+    ensure!(
+        header.logo_ok,
+        "the cartridge header logo check failed; re-seat the cartridge and try again"
+    );
+    ensure!(
+        camera::is_game_boy_camera_title(&header.title),
+        "the inserted cartridge title {:?} is not a supported Game Boy Camera title",
+        header.title
+    );
+    if header.cartridge_type != 0xFC {
+        bail!(
+            "the inserted cartridge title matched, but the cartridge type was 0x{:02X} instead of 0xFC",
+            header.cartridge_type
         );
-    } else {
-        println!("Response (hex): {}", format_hex(&response));
-        println!("Response (text): {}", String::from_utf8_lossy(&response));
     }
 
+    device
+        .dump_sram(
+            &options.output,
+            camera::SRAM_BANK_COUNT,
+            camera::SRAM_BANK_SIZE,
+        )
+        .with_context(|| format!("failed to dump SRAM to {}", options.output.display()))?;
+
+    println!(
+        "Wrote {} bytes of SRAM to {}.",
+        camera::SRAM_SIZE,
+        options.output.display()
+    );
     Ok(())
 }
 
@@ -91,12 +111,4 @@ fn describe_port(port: &serialport::SerialPortInfo) -> String {
         SerialPortType::PciPort => format!("{} - PCI serial port", port.port_name),
         SerialPortType::Unknown => format!("{} - serial port", port.port_name),
     }
-}
-
-fn format_hex(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|byte| format!("{byte:02X}"))
-        .collect::<Vec<_>>()
-        .join(" ")
 }

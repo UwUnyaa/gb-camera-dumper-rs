@@ -1,5 +1,8 @@
-// Cartrige metadata
+#![allow(dead_code)]
+
+// Cartridge metadata
 pub const CARTRIDGE_TITLE: &str = "GAMEBOYCAMERA";
+pub const JAPANESE_CARTRIDGE_TITLE: &str = "POCKETCAMERA";
 
 // SRAM layout for the retail Game Boy Camera / Pocket Camera cartridges.
 //
@@ -28,6 +31,10 @@ pub const PICTURE_OWNER_METADATA_ECHO_SIZE: usize = 0x005C;
 pub const CAMERA_OWNER_METADATA_SIZE: usize = 0x0019;
 pub const CAMERA_OWNER_METADATA_ECHO_SIZE: usize = 0x0019;
 pub const PHOTO_SLOT_TRAILER_SIZE: usize = 0x0016;
+
+pub fn is_game_boy_camera_title(title: &str) -> bool {
+    matches!(title, CARTRIDGE_TITLE | JAPANESE_CARTRIDGE_TITLE)
+}
 
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -220,5 +227,12 @@ mod tests {
         assert_eq!(size_of::<CameraOwnerMetadata>(), CAMERA_OWNER_METADATA_SIZE);
         assert_eq!(size_of::<PhotoSlot>(), PHOTO_SLOT_SIZE);
         assert_eq!(size_of::<GameBoyCameraSram>(), SRAM_SIZE);
+    }
+
+    #[test]
+    fn recognises_supported_camera_titles() {
+        assert!(is_game_boy_camera_title(CARTRIDGE_TITLE));
+        assert!(is_game_boy_camera_title(JAPANESE_CARTRIDGE_TITLE));
+        assert!(!is_game_boy_camera_title("TETRIS"));
     }
 }

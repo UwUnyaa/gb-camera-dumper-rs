@@ -1,3 +1,36 @@
 #+TITLE: gb-camera-dumper-rs
 
-This is a work in progress project that is meant to provide a simple CLI tool to dump photos from a game boy camera.
+This is a work in progress project that is meant to provide a simple CLI tool to
+dump data from a Game Boy Camera through a GBxCart RW.
+
+* Proof of concept
+
+The current proof of concept auto-detects a GBxCart RW on the available serial
+ports, checks that the inserted cartridge ROM title is one of these supported
+Game Boy Camera titles, and dumps the full 128 KiB SRAM image to a file:
+
+#+begin_example
+GAMEBOYCAMERA
+POCKETCAMERA
+#+end_example
+
+#+begin_example
+cargo run -- dump-sram --output gb-camera.sav
+#+end_example
+
+If you already know the serial port, you can try it first:
+
+#+begin_example
+cargo run -- dump-sram --port /dev/ttyACM0 --output gb-camera.sav
+#+end_example
+
+To inspect the serial ports and USB metadata first:
+
+#+begin_example
+cargo run -- ports
+#+end_example
+
+The implementation is based on the GBxCart RW v1.x serial protocol used by the
+upstream insideGadgets tools: single-byte probe commands such as =C=, =h= and
+=V=, hex-with-NUL numeric commands such as =A= and =B=, and 64-byte streaming
+ROM/RAM reads controlled with =R=, =1= and =0=.
