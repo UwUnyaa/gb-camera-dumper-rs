@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }
+png = "0.18.1"
 serialport = "4.9.0"
