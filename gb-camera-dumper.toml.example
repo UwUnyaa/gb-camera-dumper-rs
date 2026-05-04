@@ -1,4 +1,5 @@
 # Example values matching the current dump-sram options.
 # The program does not load this file automatically yet.
 output = "gb-camera.sav"
+filename_template = "photo-{year}-{month:02}-{day:02}_{hour24:02}-{minute:02}_{sequential:02}_slot-{slot:02}.png"
 debug = false

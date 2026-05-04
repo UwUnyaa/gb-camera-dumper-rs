@@ -20,6 +20,15 @@ POCKETCAMERA
 cargo run -- dump-sram --output gb-camera.sav
 #+end_example
 
+You can customize exported PNG names with =--filename-template=. The supported
+fields are =year=, =month=, =day=, =hour24=, =hour12=, =minute=, =sequential=
+and =slot=. Add a width such as =:02= to zero-pad numeric fields.
+
+#+begin_example
+cargo run -- dump-sram \
+  --filename-template 'photo-{year}{month:02}{day:02}_{hour24:02}{minute:02}_{sequential:02}_slot-{slot:02}.png'
+#+end_example
+
 For now, the PNG export directory is wiped clean on each run so test dumps do
 not leave stale images behind.
 

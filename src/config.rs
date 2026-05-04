@@ -1,4 +1,4 @@
-use crate::constants::config::DEFAULT_OUTPUT_PATH;
+use crate::constants::config::{DEFAULT_FILENAME_TEMPLATE, DEFAULT_OUTPUT_PATH};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -23,6 +23,14 @@ pub enum Command {
         #[arg(long, default_value = DEFAULT_OUTPUT_PATH)]
         output: PathBuf,
 
+        /// PNG filename template.
+        ///
+        /// Supported fields: {year}, {month}, {day}, {hour24}, {hour12},
+        /// {minute}, {sequential}, and {slot}. Add a width like {slot:02}
+        /// to zero-pad numbers.
+        #[arg(long, default_value = DEFAULT_FILENAME_TEMPLATE)]
+        filename_template: String,
+
         /// Enable serial debug logging.
         #[arg(long)]
         debug: bool,
@@ -32,12 +40,21 @@ pub enum Command {
 #[derive(Debug, Clone)]
 pub struct DumpSramOptions {
     pub output: PathBuf,
+    pub filename_template: String,
     pub debug: bool,
 }
 
 pub fn parse() -> Command {
     match Cli::parse().command {
         Command::Ports => Command::Ports,
-        Command::DumpSram { output, debug } => Command::DumpSram { output, debug },
+        Command::DumpSram {
+            output,
+            filename_template,
+            debug,
+        } => Command::DumpSram {
+            output,
+            filename_template,
+            debug,
+        },
     }
 }

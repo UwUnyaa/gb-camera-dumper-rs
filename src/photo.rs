@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, ensure};
+use chrono::NaiveDateTime;
 use png::{BitDepth, ColorType, Encoder};
 use std::{
     fs::{self, File},
@@ -7,6 +8,7 @@ use std::{
 };
 
 use crate::constants::camera::*;
+use crate::filename::{PhotoFilenameContext, build_photo_filename};
 
 const STATE_VECTOR_OFFSET: usize = 0x011B2;
 const PHOTO_SLOTS_OFFSET: usize = 0x02000;
@@ -18,7 +20,13 @@ const TILE_BYTES: usize = 16;
 const TILES_PER_ROW: usize = PHOTO_WIDTH / TILE_EDGE;
 const GRAYSCALE_PALETTE: [u8; 4] = [0xFF, 0xAA, 0x55, 0x00];
 
-pub fn dump_active_photos_as_pngs(sram: &[u8], output_dir: &Path, scale: usize) -> Result<usize> {
+pub fn dump_active_photos_as_pngs(
+    sram: &[u8],
+    output_dir: &Path,
+    scale: usize,
+    filename_template: &str,
+    export_time: NaiveDateTime,
+) -> Result<usize> {
     ensure!(
         sram.len() == SRAM_SIZE,
         "expected a {}-byte Game Boy Camera SRAM dump, got {} bytes",
@@ -45,12 +53,15 @@ pub fn dump_active_photos_as_pngs(sram: &[u8], output_dir: &Path, scale: usize) 
     })?;
 
     let active_photos = active_album_photo_slots(sram)?;
-    for (album_slot_index, photo_slot_index) in &active_photos {
-        let output_path = output_dir.join(format!(
-            "album-{album_slot:02}-slot-{photo_slot:02}.png",
-            album_slot = album_slot_index + 1,
-            photo_slot = photo_slot_index + 1,
-        ));
+    for (sequential_index, (_, photo_slot_index)) in active_photos.iter().enumerate() {
+        let output_path = output_dir.join(build_photo_filename(
+            filename_template,
+            export_time,
+            PhotoFilenameContext {
+                sequential_number: sequential_index + 1,
+                photo_slot_number: photo_slot_index + 1,
+            },
+        )?);
         dump_photo_slot_as_png(sram, *photo_slot_index, &output_path, scale)?;
     }
 
@@ -193,6 +204,7 @@ fn write_grayscale_png(output_path: &Path, pixels: &[u8], width: u32, height: u3
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::NaiveDate;
     use png::Decoder;
     use std::{
         fs,
@@ -247,8 +259,19 @@ mod tests {
         let stale_file = output_dir.join("stale.txt");
         fs::write(&stale_file, b"stale").unwrap();
 
-        let photo_count = dump_active_photos_as_pngs(&sram, &output_dir, 2).unwrap();
-        let png_path = output_dir.join("album-01-slot-01.png");
+        let export_time = NaiveDate::from_ymd_opt(2026, 5, 4)
+            .unwrap()
+            .and_hms_opt(13, 7, 0)
+            .unwrap();
+        let photo_count = dump_active_photos_as_pngs(
+            &sram,
+            &output_dir,
+            2,
+            "photo-{sequential:02}-slot-{slot:02}.png",
+            export_time,
+        )
+        .unwrap();
+        let png_path = output_dir.join("photo-01-slot-01.png");
         let png_bytes = fs::read(&png_path).unwrap();
         let decoder = Decoder::new(Cursor::new(&png_bytes));
         let reader = decoder.read_info().unwrap();

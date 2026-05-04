@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.102"
+chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.6.1", features = ["derive"] }
 png = "0.18.1"
 serialport = "4.9.0"

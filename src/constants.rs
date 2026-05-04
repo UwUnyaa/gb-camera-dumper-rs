@@ -25,6 +25,7 @@ pub(crate) mod camera {
 }
 
 pub(crate) mod config {
+    pub const DEFAULT_FILENAME_TEMPLATE: &str = "photo-{sequential:02}-slot-{slot:02}.png";
     pub const DEFAULT_OUTPUT_PATH: &str = "gb-camera.sav";
     pub const DEFAULT_PHOTO_OUTPUT_DIR: &str = "gb-camera-photos";
 }

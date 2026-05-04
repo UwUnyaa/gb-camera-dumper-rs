@@ -1,10 +1,12 @@
 mod camera;
 mod config;
 mod constants;
+mod filename;
 mod gbxcart;
 mod photo;
 
 use anyhow::{Context, Result, bail, ensure};
+use chrono::Local;
 use config::{Command, DumpSramOptions};
 use constants::camera as camera_constants;
 use constants::config::DEFAULT_PHOTO_OUTPUT_DIR;
@@ -19,7 +21,15 @@ fn main() -> Result<()> {
 
     match command {
         Command::Ports => list_ports(),
-        Command::DumpSram { output, debug } => dump_sram(DumpSramOptions { output, debug }),
+        Command::DumpSram {
+            output,
+            filename_template,
+            debug,
+        } => dump_sram(DumpSramOptions {
+            output,
+            filename_template,
+            debug,
+        }),
     }
 }
 
@@ -110,11 +120,15 @@ fn dump_sram(options: DumpSramOptions) -> Result<()> {
             options.output.display()
         )
     })?;
-    let photo_count =
-        photo::dump_active_photos_as_pngs(&sram, &photo_output_dir, PHOTO_EXPORT_SCALE)
-            .with_context(|| {
-                format!("failed to export photos to {}", photo_output_dir.display())
-            })?;
+    let export_time = Local::now().naive_local();
+    let photo_count = photo::dump_active_photos_as_pngs(
+        &sram,
+        &photo_output_dir,
+        PHOTO_EXPORT_SCALE,
+        &options.filename_template,
+        export_time,
+    )
+    .with_context(|| format!("failed to export photos to {}", photo_output_dir.display()))?;
     println!(
         "Exported {photo_count} undeleted photos to {}.",
         photo_output_dir.display()
