@@ -1,16 +1,12 @@
 use crate::constants::gbxcart::*;
+use crate::log::{debug_log, debug_log_verbose, progress_log};
 use anyhow::{Context, Result, anyhow, bail};
 use serialport::{ClearBuffer, SerialPort};
-use std::env;
 use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
-
-static DEBUG_ENABLED: AtomicBool = AtomicBool::new(false);
-static DEBUG_VERBOSE_ENABLED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CartridgeMode {
@@ -69,12 +65,21 @@ impl GbxcartDevice {
         }
 
         let ordered_ports = ordered_port_names(&ports);
+        progress_log(&format!(
+            "Scanning {} serial ports for a GBxCart RW...",
+            ordered_ports.len()
+        ));
         let mut attempts = Vec::new();
 
         for port_name in ordered_ports {
             for baud_rate in BAUD_RATES {
                 match Self::try_connect(&port_name, baud_rate, timeout) {
-                    Ok(device) => return Ok((device, attempts)),
+                    Ok(device) => {
+                        progress_log(&format!(
+                            "Detected GBxCart RW on {port_name} at {baud_rate} baud."
+                        ));
+                        return Ok((device, attempts));
+                    }
                     Err(error) => attempts.push(format!("{port_name} @ {baud_rate}: {error}")),
                 }
             }
@@ -105,6 +110,7 @@ impl GbxcartDevice {
     }
 
     pub fn read_cartridge_header(&mut self) -> Result<CartridgeHeader> {
+        progress_log("Reading the cartridge header...");
         let header = self
             .read_dmg_rom(0, HEADER_READ_LENGTH)
             .context("failed to read the cartridge header")?;
@@ -146,6 +152,7 @@ impl GbxcartDevice {
 
     fn prepare_for_game_boy_camera_modern(&mut self) -> Result<()> {
         debug_log("using modern firmware prep path");
+        progress_log("Preparing the reader with the modern firmware path...");
         let power_query = self.request_value(QUERY_CART_POWER_BINARY_COMMAND);
         log_power_query("binary query cart power", &power_query);
 
@@ -161,6 +168,7 @@ impl GbxcartDevice {
     }
 
     fn prepare_for_game_boy_camera_legacy(&mut self) -> Result<()> {
+        progress_log("Preparing the reader with the legacy firmware path...");
         let power_query = self.request_value(QUERY_CART_POWER_COMMAND);
         log_power_query("query cart power", &power_query);
 
@@ -180,8 +188,11 @@ impl GbxcartDevice {
     }
 
     fn configure_modern_game_boy_mode(&mut self) -> Result<()> {
+        progress_log("Switching the reader into Game Boy mode...");
         self.send_command_expect_ack(SET_MODE_DMG_COMMAND, "set DMG mode")?;
+        progress_log("Setting cartridge voltage to 5V...");
         self.send_command_expect_ack(SET_VOLTAGE_5V_BINARY_COMMAND, "set 5V")?;
+        progress_log("Disabling cart pull-ups...");
         self.send_command_expect_ack(DISABLE_PULLUPS_COMMAND, "disable pullups")?;
         self.set_fw_variable(1, FW_VAR_CART_MODE, 1)?;
         self.set_fw_variable(4, FW_VAR_ADDRESS, 0)?;
@@ -189,6 +200,7 @@ impl GbxcartDevice {
     }
 
     fn power_on_cartridge_binary(&mut self) -> Result<()> {
+        progress_log("Powering on the cartridge...");
         self.send_command_expect_ack(CART_POWER_ON_BINARY_COMMAND, "power on cartridge")?;
         thread::sleep(Duration::from_millis(200));
         Ok(())
@@ -207,6 +219,7 @@ impl GbxcartDevice {
             || self.info.firmware_version != 0
         {
             debug_log("sending legacy 5V command");
+            progress_log("Setting cartridge voltage to 5V...");
             self.send_command(VOLTAGE_5V_COMMAND)
                 .context("failed to switch the GBxCart RW to 5V mode")?;
             self.wait_and_clear_buffers(Duration::from_millis(500));
@@ -216,6 +229,7 @@ impl GbxcartDevice {
 
     fn power_on_cartridge_legacy(&mut self) -> Result<()> {
         debug_log("sending legacy cart power on command");
+        progress_log("Powering on the cartridge...");
         self.send_command(POWER_CART_ON_COMMAND)
             .context("failed to power on the cartridge")?;
         self.wait_and_clear_buffers(Duration::from_millis(500));
@@ -224,6 +238,7 @@ impl GbxcartDevice {
 
     fn enter_legacy_game_boy_mode(&mut self) -> Result<()> {
         debug_log("switching to DMG mode and resetting mapper");
+        progress_log("Switching the reader into Game Boy mode...");
         self.send_command(GB_CART_MODE_COMMAND)
             .context("failed to switch the GBxCart RW into Game Boy cart mode")?;
         self.send_command(SET_MODE_DMG_COMMAND)
@@ -234,6 +249,7 @@ impl GbxcartDevice {
     }
 
     fn finish_game_boy_prep(&mut self) -> Result<()> {
+        progress_log("Resetting the cartridge mapper...");
         self.send_command_expect_ack(DMG_MBC_RESET_COMMAND, "reset DMG mapper")?;
         thread::sleep(Duration::from_millis(150));
         self.clear_buffers()
@@ -281,11 +297,13 @@ impl GbxcartDevice {
     }
 
     fn enable_cartridge_ram(&mut self) -> Result<()> {
+        progress_log("Enabling cartridge RAM...");
         self.set_bank(0x0000, 0x0A)
             .context("failed to enable cartridge RAM")
     }
 
     fn disable_cartridge_ram(&mut self) -> Result<()> {
+        progress_log("Disabling cartridge RAM...");
         self.set_bank(0x0000, 0x00)
     }
 
@@ -298,6 +316,11 @@ impl GbxcartDevice {
     ) -> Result<()> {
         let bank = u8::try_from(bank_index).context("SRAM bank index overflowed u8")?;
         debug_log(&format!("dumping SRAM bank {bank} of {}", bank_count - 1));
+        progress_log(&format!(
+            "Reading SRAM bank {}/{}...",
+            bank_index + 1,
+            bank_count
+        ));
         self.select_sram_bank(bank)?;
 
         for block_offset in (0..bank_size).step_by(STREAM_BLOCK_SIZE) {
@@ -518,15 +541,6 @@ impl GbxcartDevice {
     }
 }
 
-pub fn set_debug_logging(enabled: bool) {
-    DEBUG_ENABLED.store(enabled, Ordering::Relaxed);
-}
-
-#[allow(dead_code)]
-pub fn set_verbose_debug_logging(enabled: bool) {
-    DEBUG_VERBOSE_ENABLED.store(enabled, Ordering::Relaxed);
-}
-
 fn log_power_query(label: &str, result: &Result<u8>) {
     match result {
         Ok(value) => debug_log(&format!("{label} returned 0x{value:02X}")),
@@ -574,20 +588,6 @@ fn request_value(port: &mut dyn SerialPort, command: u8) -> Result<u8> {
             }
             Err(error) => return Err(error).context("failed while reading a probe response"),
         }
-    }
-}
-
-fn debug_log(message: &str) {
-    if DEBUG_ENABLED.load(Ordering::Relaxed) || env::var_os("GB_CAMERA_DEBUG").is_some() {
-        eprintln!("[gb-camera-debug] {message}");
-    }
-}
-
-fn debug_log_verbose(message: &str) {
-    if DEBUG_VERBOSE_ENABLED.load(Ordering::Relaxed)
-        || env::var_os("GB_CAMERA_DEBUG_VERBOSE").is_some()
-    {
-        eprintln!("[gb-camera-debug] {message}");
     }
 }
 

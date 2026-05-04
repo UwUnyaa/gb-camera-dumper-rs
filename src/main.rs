@@ -3,6 +3,7 @@ mod config;
 mod constants;
 mod filename;
 mod gbxcart;
+mod log;
 mod photo;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -11,6 +12,7 @@ use config::{Command, DumpSramOptions};
 use constants::camera as camera_constants;
 use constants::config::DEFAULT_PHOTO_OUTPUT_DIR;
 use gbxcart::{CartridgeMode, GbxcartDevice};
+use log::{progress_log, set_debug_logging};
 use serialport::SerialPortType;
 use std::{fs, path::Path};
 
@@ -49,8 +51,9 @@ fn list_ports() -> Result<()> {
 }
 
 fn dump_sram(options: DumpSramOptions) -> Result<()> {
-    gbxcart::set_debug_logging(options.debug);
+    set_debug_logging(options.debug);
 
+    progress_log("Detecting GBxCart RW...");
     let (mut device, attempts) = GbxcartDevice::autodetect()?;
 
     if !attempts.is_empty() {
@@ -68,6 +71,7 @@ fn dump_sram(options: DumpSramOptions) -> Result<()> {
         device.info().firmware_version
     );
 
+    progress_log("Preparing cartridge access...");
     device.prepare_for_game_boy_camera()?;
     ensure!(
         device.info().cartridge_mode == CartridgeMode::GameBoy,
@@ -75,6 +79,7 @@ fn dump_sram(options: DumpSramOptions) -> Result<()> {
     );
     let mut header = device.read_cartridge_header()?;
     if header_looks_uninitialized(&header) {
+        progress_log("Header looked uninitialized; retrying cartridge prep...");
         device.prepare_for_game_boy_camera()?;
         header = device.read_cartridge_header()?;
     }
@@ -99,6 +104,11 @@ fn dump_sram(options: DumpSramOptions) -> Result<()> {
         );
     }
 
+    progress_log(&format!(
+        "Dumping {} SRAM banks to {}...",
+        camera_constants::SRAM_BANK_COUNT,
+        options.output.display()
+    ));
     device
         .dump_sram(
             &options.output,
@@ -114,6 +124,10 @@ fn dump_sram(options: DumpSramOptions) -> Result<()> {
     );
 
     let photo_output_dir = photo_output_dir(&options.output);
+    progress_log(&format!(
+        "Exporting photos to {}...",
+        photo_output_dir.display()
+    ));
     let sram = fs::read(&options.output).with_context(|| {
         format!(
             "failed to read dumped SRAM from {}",

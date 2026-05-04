@@ -9,6 +9,7 @@ use std::{
 
 use crate::constants::camera::*;
 use crate::filename::{PhotoFilenameContext, build_photo_filename};
+use crate::log::progress_log;
 
 const STATE_VECTOR_OFFSET: usize = 0x011B2;
 const PHOTO_SLOTS_OFFSET: usize = 0x02000;
@@ -36,6 +37,10 @@ pub fn dump_active_photos_as_pngs(
     ensure!(scale > 0, "photo scale must be at least 1");
 
     if output_dir.exists() {
+        progress_log(&format!(
+            "Clearing existing photo output directory {}...",
+            output_dir.display()
+        ));
         // For testing, start each run from a clean export directory so stale PNGs
         // from previous dumps do not stick around and look like current results.
         fs::remove_dir_all(output_dir).with_context(|| {
@@ -45,6 +50,10 @@ pub fn dump_active_photos_as_pngs(
             )
         })?;
     }
+    progress_log(&format!(
+        "Creating photo output directory {}...",
+        output_dir.display()
+    ));
     fs::create_dir_all(output_dir).with_context(|| {
         format!(
             "failed to create photo output directory {}",
@@ -53,6 +62,10 @@ pub fn dump_active_photos_as_pngs(
     })?;
 
     let active_photos = active_album_photo_slots(sram)?;
+    progress_log(&format!(
+        "Found {} undeleted photos in the album.",
+        active_photos.len()
+    ));
     for (sequential_index, (_, photo_slot_index)) in active_photos.iter().enumerate() {
         let output_path = output_dir.join(build_photo_filename(
             filename_template,
@@ -62,6 +75,13 @@ pub fn dump_active_photos_as_pngs(
                 photo_slot_number: photo_slot_index + 1,
             },
         )?);
+        progress_log(&format!(
+            "Saving photo {}/{} from slot {} to {}...",
+            sequential_index + 1,
+            active_photos.len(),
+            photo_slot_index + 1,
+            output_path.display()
+        ));
         dump_photo_slot_as_png(sram, *photo_slot_index, &output_path, scale)?;
     }
 
