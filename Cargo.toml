@@ -9,3 +9,5 @@ chrono = { version = "0.4.42", default-features = false, features = ["clock", "s
 clap = { version = "4.6.1", features = ["derive"] }
 png = "0.18.1"
 serialport = "4.9.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
