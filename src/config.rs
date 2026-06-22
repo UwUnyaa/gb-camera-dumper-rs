@@ -69,6 +69,25 @@ pub fn parse_config<P: AsRef<Path>>(path: P) -> Result<Config> {
     Ok(cfg)
 }
 
+/// Load the config from the standard config path (XDG or HOME fallback).
+/// If the config file is missing, prints a message and returns the default Config.
+pub fn load_config() -> Result<Config> {
+    load_config_for(None, None)
+}
+
+/// Like load_config but allows overriding the XDG and HOME values for testing.
+pub fn load_config_for(xdg: Option<&str>, home: Option<&str>) -> Result<Config> {
+    let path = get_config_path_for(xdg, home);
+    if !path.exists() {
+        // Print a stable message that references XDG_CONFIG_HOME and HOME regardless of env.
+        let xdg_ref = "$XDG_CONFIG_HOME/gb-camera-dumper/config.yaml";
+        let home_ref = "$HOME/.gb-camera-dumper-config.yaml";
+        println!("Config file not found; looked at {} or {}; using defaults.", xdg_ref, home_ref);
+        return Ok(Config::default());
+    }
+    parse_config(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,8 +110,6 @@ mod tests {
     fn test_parse_config() {
         let mut path = std::env::temp_dir();
         path.push(format!("gb-camera-dumper-test-{}.yaml", std::process::id()));
-        let yaml = "output_path: \"out.sav\"\nphoto_output_dir: \"photos\"\nfilename_template: \"tmpl\"\n";
-        let yaml = "output_path: \"out.sav\"\nphoto_output_dir: \"photos\"\nfilename_template: \"tmpl\"\n";
         let yaml = "output_path: \"out.sav\"\nphoto_output_dir: \"photos\"\nfilename_template: \"tmpl\"\ndump_all_photos: true\nmark_deleted_after_dump: false\npalette: [\"#000000\", \"#555555\", \"#AAAAAA\", \"#FFFFFF\"]\nimage_scale: 2\n";
         fs::write(&path, yaml).unwrap();
         let cfg = parse_config(&path).unwrap();
@@ -104,5 +121,30 @@ mod tests {
         assert_eq!(cfg.palette.unwrap(), ["#000000".to_string(), "#555555".to_string(), "#AAAAAA".to_string(), "#FFFFFF".to_string()]);
         assert_eq!(cfg.image_scale.unwrap(), 2);
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_load_config_missing() {
+        // Point home to a unique temp path that doesn't contain a config file.
+        let temp_home = std::env::temp_dir().join(format!("gbcfg-home-{}", std::process::id()));
+        let h = temp_home.to_str().unwrap();
+        let cfg = load_config_for(None, Some(h)).unwrap();
+        assert_eq!(cfg, Config::default());
+    }
+
+    #[test]
+    fn test_load_config_present_xdg() {
+        // Create an XDG-style config: $XDG_CONFIG_HOME/gb-camera-dumper/config.yaml
+        let tempdir = std::env::temp_dir().join(format!("gbcfg-xdg-{}", std::process::id()));
+        let gbdir = tempdir.join("gb-camera-dumper");
+        fs::create_dir_all(&gbdir).unwrap();
+        let cfgfile = gbdir.join("config.yaml");
+        let yaml = "dump_all_photos: true\nimage_scale: 3\n";
+        fs::write(&cfgfile, yaml).unwrap();
+        let cfg = load_config_for(Some(tempdir.to_str().unwrap()), None).unwrap();
+        assert_eq!(cfg.dump_all_photos.unwrap(), true);
+        assert_eq!(cfg.image_scale.unwrap(), 3);
+        let _ = fs::remove_file(&cfgfile);
+        let _ = fs::remove_dir(&gbdir);
     }
 }
