@@ -134,6 +134,121 @@ impl GbxcartDevice {
         Ok(())
     }
 
+    pub fn write_sram(&mut self, input: &Path, bank_count: usize, bank_size: usize) -> Result<()> {
+        self.ensure_parent_directory(input)?;
+
+        let write_result = self.write_sram_from_file(input, bank_count, bank_size);
+        let disable_result = self.disable_cartridge_ram();
+        write_result?;
+        disable_result.context("failed to disable cartridge RAM after writing SRAM")?;
+        Ok(())
+    }
+
+    fn write_sram_from_file(
+        &mut self,
+        input: &Path,
+        bank_count: usize,
+        bank_size: usize,
+    ) -> Result<()> {
+        use std::fs;
+        let data = fs::read(input)
+            .with_context(|| format!("failed to read {}", input.display()))?;
+        if data.len() != bank_count * bank_size {
+            bail!(
+                "input SRAM file had unexpected size: expected {} bytes, got {}",
+                bank_count * bank_size,
+                data.len()
+            );
+        }
+
+        self.enable_cartridge_ram()?;
+        for bank in 0..bank_count {
+            self.write_sram_bank(&data, bank, bank_count, bank_size)?;
+        }
+
+        Ok(())
+    }
+
+    fn write_sram_bank(
+        &mut self,
+        data: &[u8],
+        bank_index: usize,
+        bank_count: usize,
+        bank_size: usize,
+    ) -> Result<()> {
+        let bank = u8::try_from(bank_index).context("SRAM bank index overflowed u8")?;
+        debug_log(&format!("writing SRAM bank {bank} of {}", bank_count - 1));
+        progress_log(&format!(
+            "Writing SRAM bank {}/{}...",
+            bank_index + 1,
+            bank_count
+        ));
+        self.select_sram_bank(bank)?;
+
+        let bank_start = bank_index * bank_size;
+        for block_offset in (0..bank_size).step_by(STREAM_BLOCK_SIZE) {
+            let absolute_start = bank_start + block_offset;
+            self.write_sram_block(data, absolute_start, block_offset)?;
+        }
+
+        Ok(())
+    }
+
+    fn write_sram_block(
+        &mut self,
+        data: &[u8],
+        absolute_start: usize,
+        offset_in_bank: usize,
+    ) -> Result<()> {
+        let end = (absolute_start + STREAM_BLOCK_SIZE).min(data.len());
+        let block = &data[absolute_start..end];
+
+        for (i, &b) in block.iter().enumerate() {
+            let addr = 0xA000_u16.wrapping_add((offset_in_bank + i) as u16);
+            self.write_dmg_cart(addr, b).with_context(|| {
+                format!(
+                    "failed to write byte {} of block {}",
+                    i,
+                    offset_in_bank / STREAM_BLOCK_SIZE
+                )
+            })?;
+        }
+
+        Ok(())
+    }
+
+    // Helper to read & validate SRAM file and split into bank/block counts for testing.
+    fn read_and_validate_sram_file(input: &Path, expected_size: usize) -> Result<Vec<u8>> {
+        use std::fs;
+        let data = fs::read(input)
+            .with_context(|| format!("failed to read {}", input.display()))?;
+        if data.len() != expected_size {
+            bail!(
+                "input SRAM file had unexpected size: expected {} bytes, got {}",
+                expected_size,
+                data.len()
+            );
+        }
+        Ok(data)
+    }
+
+    fn split_sram_into_blocks<'a>(
+        data: &'a [u8],
+        bank_count: usize,
+        bank_size: usize,
+    ) -> Vec<&'a [u8]> {
+        let mut blocks = Vec::new();
+        for bank in 0..bank_count {
+            let bank_start = bank * bank_size;
+            for offset in (0..bank_size).step_by(STREAM_BLOCK_SIZE) {
+                let start = bank_start + offset;
+                let end = std::cmp::min(start + STREAM_BLOCK_SIZE, data.len());
+                blocks.push(&data[start..end]);
+            }
+        }
+        blocks
+    }
+
     fn try_connect(port_name: &str, baud_rate: u32, timeout: Duration) -> Result<Self> {
         let mut port = Self::open_port(port_name, baud_rate, timeout)?;
         Self::reset_device_state_for_probe(&mut *port, port_name, baud_rate)?;
@@ -623,6 +738,8 @@ fn parse_cartridge_header(bytes: &[u8; HEADER_READ_LENGTH]) -> CartridgeHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn parses_camera_header_fields() {
@@ -640,5 +757,48 @@ mod tests {
         assert_eq!(parsed.rom_size_code, 0x01);
         assert_eq!(parsed.ram_size_code, 0x04);
         assert!(parsed.logo_ok);
+    }
+
+    #[test]
+    fn read_and_validate_sram_file_rejects_wrong_size() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("gb-sram-test-{}", std::process::id()));
+        let data = vec![0u8; 100];
+        fs::write(&path, &data).unwrap();
+
+        let res = GbxcartDevice::read_and_validate_sram_file(&path, 200);
+        assert!(res.is_err());
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn split_sram_into_blocks_has_expected_counts_and_content() {
+        // create data of 2 banks, each bank_size = STREAM_BLOCK_SIZE * 3
+        let bank_count = 2;
+        let bank_size = STREAM_BLOCK_SIZE * 3;
+        let total = bank_count * bank_size;
+        let mut data = Vec::with_capacity(total);
+        for i in 0..total {
+            data.push((i % 256) as u8);
+        }
+
+        let blocks = GbxcartDevice::split_sram_into_blocks(&data, bank_count, bank_size);
+        // Expect bank_count * 3 blocks
+        assert_eq!(blocks.len(), bank_count * 3);
+
+        // verify first block contents
+        assert_eq!(blocks[0].len(), STREAM_BLOCK_SIZE);
+        for i in 0..STREAM_BLOCK_SIZE {
+            assert_eq!(blocks[0][i], (i % 256) as u8);
+        }
+
+        // verify last block contents
+        let last = blocks.last().unwrap();
+        assert_eq!(last.len(), STREAM_BLOCK_SIZE);
+        let last_start = total - STREAM_BLOCK_SIZE;
+        for i in 0..STREAM_BLOCK_SIZE {
+            assert_eq!(last[i], ((last_start + i) % 256) as u8);
+        }
     }
 }
