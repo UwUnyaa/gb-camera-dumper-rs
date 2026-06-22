@@ -20,21 +20,23 @@ pub enum Command {
     /// Auto-detect a GBxCart RW, confirm a supported Game Boy Camera cartridge, and dump SRAM.
     DumpSram {
         /// Output file path for the raw SRAM dump.
-        #[arg(long, default_value = DEFAULT_OUTPUT_PATH)]
-        output: PathBuf,
+        /// When omitted, the config file or default will be used.
+        #[arg(long)]
+        output: Option<PathBuf>,
 
         /// PNG filename template.
         ///
         /// Supported fields: {year}, {month}, {day}, {hour24}, {hour12},
         /// {minute}, {sequential}, and {slot}. Add a width like {slot:02}
-        /// to zero-pad numbers.
-        #[arg(long, default_value = DEFAULT_FILENAME_TEMPLATE)]
-        filename_template: String,
+        /// to zero-pad numbers. When omitted, the config or default is used.
+        #[arg(long)]
+        filename_template: Option<String>,
 
         /// Enable serial debug logging.
         #[arg(long)]
         debug: bool,
     },
+
 }
 
 #[derive(Debug, Clone)]

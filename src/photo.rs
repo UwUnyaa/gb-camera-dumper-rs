@@ -21,12 +21,14 @@ const TILE_BYTES: usize = 16;
 const TILES_PER_ROW: usize = PHOTO_WIDTH / TILE_EDGE;
 const GRAYSCALE_PALETTE: [u8; 4] = [0xFF, 0xAA, 0x55, 0x00];
 
-pub fn dump_active_photos_as_pngs(
+pub fn dump_photos_as_pngs(
     sram: &[u8],
     output_dir: &Path,
     scale: usize,
     filename_template: &str,
     export_time: NaiveDateTime,
+    dump_all: bool,
+    palette: Option<[u8; 4]>,
 ) -> Result<usize> {
     ensure!(
         sram.len() == SRAM_SIZE,
@@ -61,12 +63,18 @@ pub fn dump_active_photos_as_pngs(
         )
     })?;
 
-    let active_photos = active_album_photo_slots(sram)?;
+    let photo_slots: Vec<(usize, usize)> = if dump_all {
+        // Dump every slot (sequential number == slot index here)
+        (0..PHOTO_SLOT_COUNT).map(|i| (i, i)).collect()
+    } else {
+        active_album_photo_slots(sram)?
+    };
+
     progress_log(&format!(
-        "Found {} undeleted photos in the album.",
-        active_photos.len()
+        "Found {} photos to export.",
+        photo_slots.len()
     ));
-    for (sequential_index, (_, photo_slot_index)) in active_photos.iter().enumerate() {
+    for (sequential_index, (_, photo_slot_index)) in photo_slots.iter().enumerate() {
         let output_path = output_dir.join(build_photo_filename(
             filename_template,
             export_time,
@@ -78,14 +86,14 @@ pub fn dump_active_photos_as_pngs(
         progress_log(&format!(
             "Saving photo {}/{} from slot {} to {}...",
             sequential_index + 1,
-            active_photos.len(),
+            photo_slots.len(),
             photo_slot_index + 1,
             output_path.display()
         ));
-        dump_photo_slot_as_png(sram, *photo_slot_index, &output_path, scale)?;
+        dump_photo_slot_as_png(sram, *photo_slot_index, &output_path, scale, palette)?;
     }
 
-    Ok(active_photos.len())
+    Ok(photo_slots.len())
 }
 
 fn active_album_photo_slots(sram: &[u8]) -> Result<Vec<(usize, usize)>> {
@@ -116,9 +124,11 @@ fn dump_photo_slot_as_png(
     photo_slot_index: usize,
     output_path: &Path,
     scale: usize,
+    palette: Option<[u8; 4]>,
 ) -> Result<()> {
     let image_tiles = photo_slot_image_tiles(sram, photo_slot_index)?;
-    let pixels = decode_photo_tiles(image_tiles);
+    let palette_ref = palette.unwrap_or(GRAYSCALE_PALETTE);
+    let pixels = decode_photo_tiles(image_tiles, &palette_ref);
     let scaled_pixels = scale_grayscale_pixels(&pixels, PHOTO_WIDTH, PHOTO_HEIGHT, scale);
     write_grayscale_png(
         output_path,
@@ -145,7 +155,7 @@ fn photo_slot_image_tiles(sram: &[u8], photo_slot_index: usize) -> Result<&[u8]>
         })
 }
 
-fn decode_photo_tiles(tile_data: &[u8]) -> Vec<u8> {
+fn decode_photo_tiles(tile_data: &[u8], palette: &[u8; 4]) -> Vec<u8> {
     let mut pixels = vec![0; PHOTO_WIDTH * PHOTO_HEIGHT];
 
     for (tile_index, tile) in tile_data.chunks_exact(TILE_BYTES).enumerate() {
@@ -163,7 +173,7 @@ fn decode_photo_tiles(tile_data: &[u8]) -> Vec<u8> {
                     (low_plane & mask != 0) as u8 | (((high_plane & mask) != 0) as u8) << 1,
                 );
                 let pixel_x = tile_x * TILE_EDGE + column;
-                pixels[pixel_y * PHOTO_WIDTH + pixel_x] = GRAYSCALE_PALETTE[shade_index];
+                pixels[pixel_y * PHOTO_WIDTH + pixel_x] = palette[shade_index];
             }
         }
     }
@@ -263,7 +273,7 @@ mod tests {
         tile_data[0] = 0b1100_0000;
         tile_data[1] = 0b0110_0000;
 
-        let pixels = decode_photo_tiles(&tile_data);
+        let pixels = decode_photo_tiles(&tile_data, &GRAYSCALE_PALETTE);
 
         assert_eq!(
             &pixels[..8],
@@ -295,12 +305,14 @@ mod tests {
             .unwrap()
             .and_hms_opt(13, 7, 0)
             .unwrap();
-        let photo_count = dump_active_photos_as_pngs(
+        let photo_count = dump_photos_as_pngs(
             &sram,
             &output_dir,
             2,
             "photo-{sequential:02}-slot-{slot:02}.png",
             export_time,
+            false,
+            None,
         )
         .unwrap();
         let png_path = output_dir.join("photo-01-slot-01.png");
