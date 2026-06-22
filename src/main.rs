@@ -1,5 +1,5 @@
 mod camera;
-mod config;
+mod command;
 mod constants;
 mod filename;
 mod gbxcart;
@@ -8,7 +8,7 @@ mod photo;
 
 use anyhow::{Context, Result, bail, ensure};
 use chrono::Local;
-use config::{Command, DumpSramOptions};
+use command::{Command, DumpSramOptions};
 use constants::camera as camera_constants;
 use constants::config::DEFAULT_PHOTO_OUTPUT_DIR;
 use gbxcart::{CartridgeMode, GbxcartDevice};
@@ -19,7 +19,7 @@ use std::{fs, path::Path};
 const PHOTO_EXPORT_SCALE: usize = 2;
 
 fn main() -> Result<()> {
-    let command = config::parse();
+    let command = command::parse();
 
     match command {
         Command::Ports => list_ports(),
