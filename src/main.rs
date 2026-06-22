@@ -1,6 +1,7 @@
 mod camera;
 mod command;
 mod constants;
+mod config;
 mod filename;
 mod gbxcart;
 mod log;
