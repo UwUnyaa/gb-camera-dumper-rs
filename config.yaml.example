@@ -1,0 +1,40 @@
+# Example config for gb-camera-dumper
+# Place at $XDG_CONFIG_HOME/gb-camera-dumper/config.yaml
+# or at $HOME/.gb-camera-dumper-config.yaml
+
+# Optional path to write the dumped SRAM file (e.g. "out.sav").
+# Default: omitted (program uses no explicit output path).
+output_path: "out.sav"
+
+# Directory where exported photos are written (relative or absolute).
+# Default: omitted (program uses current directory).
+photo_output_dir: "photos"
+
+# Filename template for exported photos.
+# When omitted, program uses DEFAULT_FILENAME_TEMPLATE.
+# Example placeholders are program-defined; this is illustrative.
+filename_template: "photo_{slot}_{index}.png"
+
+# If true, dump all photo slots including those marked deleted.
+# Default: false
+dump_all_photos: true
+
+# If true, mark photos as deleted on the cartridge after dumping.
+# Default: false
+mark_deleted_after_dump: false
+
+# Optional custom 4-color palette as hex strings. Must be exactly 4 entries.
+# Default: program's grayscale palette.
+palette:
+  - "#000000"
+  - "#555555"
+  - "#AAAAAA"
+  - "#FFFFFF"
+
+# Image scale multiplier (integer). 1 = original size.
+# Default: 1
+image_scale: 2
+
+# Notes:
+# - Omitting a field uses the program default.
+# - The parser expects valid YAML; invalid YAML will fail parsing.

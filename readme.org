@@ -42,3 +42,9 @@ The implementation is based on the GBxCart RW v1.x serial protocol used by the
 upstream insideGadgets tools: single-byte probe commands such as =C=, =h= and
 =V=, hex-with-NUL numeric commands such as =A= and =B=, and 64-byte streaming
 ROM/RAM reads controlled with =R=, =1= and =0=.
+
+* Configuration
+
+An example config file is included at config.yaml.example in the repository
+root. Copy it to $XDG_CONFIG_HOME/gb-camera-dumper/config.yaml or
+$HOME/.gb-camera-dumper-config.yaml and edit as needed.
