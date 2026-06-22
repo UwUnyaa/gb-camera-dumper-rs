@@ -85,7 +85,12 @@ fn render_placeholder(
 
     Ok(match width {
         Some(width) => format!("{numeric_value:0width$}"),
-        None => numeric_value.to_string(),
+        None => {
+            match field {
+                "hour24" | "hour12" | "minute" => format!("{numeric_value:02}"),
+                _ => numeric_value.to_string(),
+            }
+        }
     })
 }
 
