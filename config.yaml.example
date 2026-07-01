@@ -2,12 +2,18 @@
 # Place at $XDG_CONFIG_HOME/gb-camera-dumper/config.yaml
 # or at $HOME/.gb-camera-dumper-config.yaml
 
+# If true, the program will dump SRAM into memory instead of writing
+# the raw SRAM file to disk. This is useful when the caller only needs
+# to process photos and does not want to persist the .sav file.
+# Default: true
+sram_in_memory: true
+
 # Optional path to write the dumped SRAM file (e.g. "out.sav").
-# Default: omitted (program uses no explicit output path).
+# Default: omitted (program uses default path "gb-camera.sav").
 output_path: "out.sav"
 
 # Directory where exported photos are written (relative or absolute).
-# Default: omitted (program uses current directory).
+# Default: omitted (program uses the output file's parent/DEFAULT_PHOTO_OUTPUT_DIR).
 photo_output_dir: "photos"
 
 # Filename template for exported photos.

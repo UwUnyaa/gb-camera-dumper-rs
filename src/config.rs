@@ -8,6 +8,11 @@ pub struct Config {
     /// Optional path to write the dumped SRAM file (e.g. "out.sav").
     pub output_path: Option<String>,
 
+    /// If true, dump SRAM into memory and do not persist the raw .sav file to disk.
+    /// Useful when the caller only needs in-memory processing of photo data.
+    /// CLI options (if provided) still take precedence over config values.
+    pub sram_in_memory: Option<bool>,
+
     /// Directory where exported photos will be written (relative or absolute).
     pub photo_output_dir: Option<String>,
 

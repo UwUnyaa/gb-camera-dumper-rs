@@ -134,12 +134,62 @@ impl GbxcartDevice {
         Ok(())
     }
 
+    /// Dump the cartridge SRAM directly into an in-memory Vec<u8> instead of
+    /// creating a file on disk. The returned Vec will contain bank_count * bank_size
+    /// bytes on success. The cartridge RAM will be disabled before returning.
+    pub fn dump_sram_to_vec(&mut self, bank_count: usize, bank_size: usize) -> Result<Vec<u8>> {
+        let mut out = Vec::with_capacity(bank_count * bank_size);
+
+        self.enable_cartridge_ram()?;
+        for bank in 0..bank_count {
+            let bank_u8 = u8::try_from(bank).context("SRAM bank index overflowed u8")?;
+            self.select_sram_bank(bank_u8)?;
+
+            for block_offset in (0..bank_size).step_by(STREAM_BLOCK_SIZE) {
+                let chunk = self
+                    .read_dmg_ram(block_offset as u16, STREAM_BLOCK_SIZE)
+                    .with_context(|| {
+                        format!(
+                            "failed to read block {} from SRAM bank {bank}",
+                            block_offset / STREAM_BLOCK_SIZE
+                        )
+                    })?;
+                out.extend_from_slice(&chunk);
+            }
+        }
+
+        let disable_result = self.disable_cartridge_ram();
+        disable_result.context("failed to disable cartridge RAM after dumping SRAM")?;
+        Ok(out)
+    }
+
     pub fn write_sram(&mut self, input: &Path, bank_count: usize, bank_size: usize) -> Result<()> {
         self.ensure_parent_directory(input)?;
 
         let write_result = self.write_sram_from_file(input, bank_count, bank_size);
         let disable_result = self.disable_cartridge_ram();
         write_result?;
+        disable_result.context("failed to disable cartridge RAM after writing SRAM")?;
+        Ok(())
+    }
+
+    /// Write the provided SRAM bytes directly to the cartridge without using a
+    /// temporary file on disk. Expects data.len() == bank_count * bank_size.
+    pub fn write_sram_bytes(&mut self, data: &[u8], bank_count: usize, bank_size: usize) -> Result<()> {
+        if data.len() != bank_count * bank_size {
+            bail!(
+                "input SRAM data had unexpected size: expected {} bytes, got {}",
+                bank_count * bank_size,
+                data.len()
+            );
+        }
+
+        self.enable_cartridge_ram()?;
+        for bank in 0..bank_count {
+            self.write_sram_bank(data, bank, bank_count, bank_size)?;
+        }
+
+        let disable_result = self.disable_cartridge_ram();
         disable_result.context("failed to disable cartridge RAM after writing SRAM")?;
         Ok(())
     }

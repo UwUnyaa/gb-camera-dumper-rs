@@ -124,42 +124,65 @@ fn dump_sram(options: DumpSramOptions, cfg: config::Config) -> Result<()> {
         );
     }
 
-    progress_log(&format!(
-        "Dumping {} SRAM banks to {}...",
-        camera_constants::SRAM_BANK_COUNT,
-        options.output.display()
-    ));
-    device
-        .dump_sram(
-            &options.output,
+    // Dump SRAM either to memory or to a file depending on config.
+    let mut sram: Vec<u8>;
+    if cfg.sram_in_memory.unwrap_or(true) {
+        progress_log(&format!(
+            "Dumping {} SRAM banks into memory...",
+            camera_constants::SRAM_BANK_COUNT
+        ));
+        sram = device
+            .dump_sram_to_vec(camera_constants::SRAM_BANK_COUNT, camera_constants::SRAM_BANK_SIZE)
+            .with_context(|| "failed to dump SRAM into memory")?;
+        println!("Read {} bytes of SRAM into memory.", sram.len());
+    } else {
+        progress_log(&format!(
+            "Dumping {} SRAM banks to {}...",
             camera_constants::SRAM_BANK_COUNT,
-            camera_constants::SRAM_BANK_SIZE,
-        )
-        .with_context(|| format!("failed to dump SRAM to {}", options.output.display()))?;
+            options.output.display()
+        ));
+        device
+            .dump_sram(
+                &options.output,
+                camera_constants::SRAM_BANK_COUNT,
+                camera_constants::SRAM_BANK_SIZE,
+            )
+            .with_context(|| format!("failed to dump SRAM to {}", options.output.display()))?;
 
-    println!(
-        "Wrote {} bytes of SRAM to {}.",
-        camera_constants::SRAM_SIZE,
-        options.output.display()
-    );
+        println!(
+            "Wrote {} bytes of SRAM to {}.",
+            camera_constants::SRAM_SIZE,
+            options.output.display()
+        );
+
+        sram = fs::read(&options.output).with_context(|| {
+            format!(
+                "failed to read dumped SRAM from {}",
+                options.output.display()
+            )
+        })?;
+    }
 
     // Determine photo output directory from config or derive from output path.
     let photo_output_dir = cfg
         .photo_output_dir
         .clone()
         .map(PathBuf::from)
-        .unwrap_or_else(|| photo_output_dir(&options.output));
+        .unwrap_or_else(|| {
+            if cfg.sram_in_memory.unwrap_or(true) {
+                // When dumping to memory and no photo_output_dir is provided, use
+                // the current directory + DEFAULT_PHOTO_OUTPUT_DIR rather than
+                // deriving from a non-present output file path.
+                PathBuf::from(".").join(DEFAULT_PHOTO_OUTPUT_DIR)
+            } else {
+                photo_output_dir(&options.output)
+            }
+        });
 
     progress_log(&format!(
         "Exporting photos to {}...",
         photo_output_dir.display()
     ));
-    let mut sram = fs::read(&options.output).with_context(|| {
-        format!(
-            "failed to read dumped SRAM from {}",
-            options.output.display()
-        )
-    })?;
     let export_time = Local::now().naive_local();
 
     // Parse palette from config if present: hex colors -> grayscale u8
@@ -209,17 +232,24 @@ fn dump_sram(options: DumpSramOptions, cfg: config::Config) -> Result<()> {
     if cfg.mark_deleted_after_dump.unwrap_or(false) {
         progress_log("Marking all photos deleted in SRAM as requested by config...");
         photo::mark_all_photos_deleted_in_bytes(&mut sram)?;
-        // Overwrite the dumped SRAM file with the modified bytes and write back to cartridge.
-        fs::write(&options.output, &sram).with_context(|| {
-            format!("failed to write modified SRAM to {}", options.output.display())
-        })?;
-        device
-            .write_sram(
-                &options.output,
-                camera_constants::SRAM_BANK_COUNT,
-                camera_constants::SRAM_BANK_SIZE,
-            )
-            .with_context(|| format!("failed to write modified SRAM back to cartridge"))?;
+        if cfg.sram_in_memory.unwrap_or(true) {
+            // Write back directly from memory
+            device
+                .write_sram_bytes(&sram, camera_constants::SRAM_BANK_COUNT, camera_constants::SRAM_BANK_SIZE)
+                .with_context(|| format!("failed to write modified SRAM back to cartridge"))?;
+        } else {
+            // Overwrite the dumped SRAM file with the modified bytes and write back to cartridge.
+            fs::write(&options.output, &sram).with_context(|| {
+                format!("failed to write modified SRAM to {}", options.output.display())
+            })?;
+            device
+                .write_sram(
+                    &options.output,
+                    camera_constants::SRAM_BANK_COUNT,
+                    camera_constants::SRAM_BANK_SIZE,
+                )
+                .with_context(|| format!("failed to write modified SRAM back to cartridge"))?;
+        }
         progress_log("Marked photos deleted on cartridge.");
     }
 
