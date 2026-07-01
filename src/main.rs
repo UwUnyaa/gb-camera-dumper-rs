@@ -236,7 +236,7 @@ fn dump_sram(options: DumpSramOptions, cfg: config::Config) -> Result<()> {
             // Write back directly from memory
             device
                 .write_sram_bytes(&sram, camera_constants::SRAM_BANK_COUNT, camera_constants::SRAM_BANK_SIZE)
-                .with_context(|| format!("failed to write modified SRAM back to cartridge"))?;
+                .with_context(|| "failed to write modified SRAM back to cartridge".to_string())?;
         } else {
             // Overwrite the dumped SRAM file with the modified bytes and write back to cartridge.
             fs::write(&options.output, &sram).with_context(|| {
@@ -248,7 +248,7 @@ fn dump_sram(options: DumpSramOptions, cfg: config::Config) -> Result<()> {
                     camera_constants::SRAM_BANK_COUNT,
                     camera_constants::SRAM_BANK_SIZE,
                 )
-                .with_context(|| format!("failed to write modified SRAM back to cartridge"))?;
+                .with_context(|| "failed to write modified SRAM back to cartridge".to_string())?;
         }
         progress_log("Marked photos deleted on cartridge.");
     }

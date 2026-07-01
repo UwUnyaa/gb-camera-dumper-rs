@@ -137,8 +137,8 @@ mod tests {
         assert_eq!(cfg.output_path.unwrap(), "out.sav");
         assert_eq!(cfg.photo_output_dir.unwrap(), "photos");
         assert_eq!(cfg.filename_template.unwrap(), "tmpl");
-        assert_eq!(cfg.dump_all_photos.unwrap(), true);
-        assert_eq!(cfg.mark_deleted_after_dump.unwrap(), false);
+        assert!(cfg.dump_all_photos.unwrap());
+        assert!(!cfg.mark_deleted_after_dump.unwrap());
         assert_eq!(cfg.palette.unwrap(), ["#000000".to_string(), "#555555".to_string(), "#AAAAAA".to_string(), "#FFFFFF".to_string()]);
         assert_eq!(cfg.image_scale.unwrap(), 2);
         let _ = fs::remove_file(&path);
@@ -163,7 +163,7 @@ mod tests {
         let yaml = "dump_all_photos: true\nimage_scale: 3\n";
         fs::write(&cfgfile, yaml).unwrap();
         let cfg = load_config_for(Some(tempdir.to_str().unwrap()), None).unwrap();
-        assert_eq!(cfg.dump_all_photos.unwrap(), true);
+        assert!(cfg.dump_all_photos.unwrap());
         assert_eq!(cfg.image_scale.unwrap(), 3);
         let _ = fs::remove_file(&cfgfile);
         let _ = fs::remove_dir(&gbdir);

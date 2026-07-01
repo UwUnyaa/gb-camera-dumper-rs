@@ -284,11 +284,11 @@ impl GbxcartDevice {
     }
 
     #[cfg(test)]
-    fn split_sram_into_blocks<'a>(
-        data: &'a [u8],
+    fn split_sram_into_blocks(
+        data: &[u8],
         bank_count: usize,
         bank_size: usize,
-    ) -> Vec<&'a [u8]> {
+    ) -> Vec<&[u8]> {
         let mut blocks = Vec::new();
         for bank in 0..bank_count {
             let bank_start = bank * bank_size;
@@ -435,12 +435,10 @@ impl GbxcartDevice {
     }
 
     fn ensure_parent_directory(&self, output: &Path) -> Result<()> {
-        if let Some(parent) = output.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent).with_context(|| {
-                    format!("failed to create output directory {}", parent.display())
-                })?;
-            }
+        if let Some(parent) = output.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create output directory {}", parent.display())
+            })?;
         }
 
         Ok(())
