@@ -1,4 +1,3 @@
-use crate::constants::config::{DEFAULT_FILENAME_TEMPLATE, DEFAULT_OUTPUT_PATH};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 

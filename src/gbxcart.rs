@@ -268,6 +268,7 @@ impl GbxcartDevice {
     }
 
     // Helper to read & validate SRAM file and split into bank/block counts for testing.
+    #[cfg(test)]
     fn read_and_validate_sram_file(input: &Path, expected_size: usize) -> Result<Vec<u8>> {
         use std::fs;
         let data = fs::read(input)
@@ -282,6 +283,7 @@ impl GbxcartDevice {
         Ok(data)
     }
 
+    #[cfg(test)]
     fn split_sram_into_blocks<'a>(
         data: &'a [u8],
         bank_count: usize,
@@ -789,7 +791,6 @@ fn parse_cartridge_header(bytes: &[u8; HEADER_READ_LENGTH]) -> CartridgeHeader {
 mod tests {
     use super::*;
     use std::fs;
-    use std::path::PathBuf;
 
     #[test]
     fn parses_camera_header_fields() {

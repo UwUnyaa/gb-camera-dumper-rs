@@ -36,6 +36,7 @@ pub struct Config {
 /// Returns an XDG-compliant config path when XDG_CONFIG_HOME is set:
 ///   $XDG_CONFIG_HOME/gb-camera-dumper/config.yaml
 /// Otherwise falls back to: $HOME/.gb-camera-dumper-config.yaml
+#[allow(dead_code)]
 pub fn get_config_path() -> PathBuf {
     get_config_path_for(None, None)
 }
