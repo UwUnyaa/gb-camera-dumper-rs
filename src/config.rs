@@ -75,6 +75,21 @@ pub fn load_config() -> Result<Config> {
     load_config_for(None, None)
 }
 
+/// Load the config from an explicit path if provided, otherwise fall back to
+/// the standard load_config behaviour. If the explicit path is provided but
+/// the file does not exist, a message is printed and defaults are returned.
+pub fn load_config_from_path<P: AsRef<Path>>(path_opt: Option<P>) -> Result<Config> {
+    if let Some(p) = path_opt {
+        let p = p.as_ref();
+        if !p.exists() {
+            println!("Config file not found at {}; using defaults.", p.display());
+            return Ok(Config::default());
+        }
+        return parse_config(p);
+    }
+    load_config()
+}
+
 /// Like load_config but allows overriding the XDG and HOME values for testing.
 pub fn load_config_for(xdg: Option<&str>, home: Option<&str>) -> Result<Config> {
     let path = get_config_path_for(xdg, home);

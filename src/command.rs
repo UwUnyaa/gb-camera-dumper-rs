@@ -9,6 +9,11 @@ use std::path::PathBuf;
     about = "Proof-of-concept GBxCart RW Game Boy Camera SRAM dumper"
 )]
 struct Cli {
+    /// Path to a YAML config file. If provided, this overrides the usual
+    /// $XDG_CONFIG_HOME/... or $HOME/.gb-camera-dumper-config.yaml locations.
+    #[arg(short = 'c', long = "config")]
+    config: Option<std::path::PathBuf>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -46,8 +51,9 @@ pub struct DumpSramOptions {
     pub debug: bool,
 }
 
-pub fn parse() -> Command {
-    match Cli::parse().command {
+pub fn parse() -> (Command, Option<std::path::PathBuf>) {
+    let cli = Cli::parse();
+    let cmd = match cli.command {
         Command::Ports => Command::Ports,
         Command::DumpSram {
             output,
@@ -58,5 +64,6 @@ pub fn parse() -> Command {
             filename_template,
             debug,
         },
-    }
+    };
+    (cmd, cli.config)
 }

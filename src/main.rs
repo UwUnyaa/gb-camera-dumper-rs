@@ -20,10 +20,10 @@ use std::{fs, path::Path, path::PathBuf};
 const PHOTO_EXPORT_SCALE: usize = 2;
 
 fn main() -> Result<()> {
-    let command = command::parse();
+    let (command, config_path) = command::parse();
 
     // Load config early so CLI options can be merged with config values.
-    let cfg = match config::load_config() {
+    let cfg = match config::load_config_from_path(config_path) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Failed to read config: {}. Using defaults.", e);
