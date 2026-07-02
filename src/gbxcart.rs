@@ -109,6 +109,40 @@ impl GbxcartDevice {
         self.prepare_for_game_boy_camera_legacy()
     }
 
+    /// Ensure the cartridge is powered with the expected voltage for Game Boy
+    /// access. On modern firmware this toggles voltage and power to force the
+    /// cartridge into a known state. For legacy firmware it re-applies the
+    /// legacy voltage/power sequence.
+    pub fn ensure_cart_powered(&mut self) -> Result<()> {
+        if self.uses_modern_firmware() {
+            debug_log("ensuring cartridge power (modern path)");
+            // Try a voltage cycle: 3.3V -> 5V, then explicitly power the cart.
+            // Use acked binary commands where possible.
+            self.send_command_expect_ack(SET_VOLTAGE_3V_BINARY_COMMAND, "set 3.3V")?;
+            thread::sleep(Duration::from_millis(150));
+            self.send_command_expect_ack(SET_VOLTAGE_5V_BINARY_COMMAND, "set 5V")?;
+            thread::sleep(Duration::from_millis(150));
+
+            // Some firmwares expect explicit cart power command even after
+            // setting voltage.
+            let _ = self.send_command(CART_POWER_ON_BINARY_COMMAND);
+            thread::sleep(Duration::from_millis(200));
+
+            // Finish the standard prep steps (mapper reset, clear buffers).
+            self.finish_game_boy_prep()?;
+            Ok(())
+        } else {
+            debug_log("ensuring cartridge power (legacy path)");
+            self.maybe_set_legacy_voltage()?;
+            // Try powering via legacy sequence and re-enter DMG mode.
+            let _ = self.power_on_cartridge_legacy();
+            thread::sleep(Duration::from_millis(200));
+            self.enter_legacy_game_boy_mode()?;
+            self.finish_game_boy_prep()?;
+            Ok(())
+        }
+    }
+
     pub fn read_cartridge_header(&mut self) -> Result<CartridgeHeader> {
         progress_log("Reading the cartridge header...");
         let header = self
@@ -302,8 +336,20 @@ impl GbxcartDevice {
     }
 
     fn try_connect(port_name: &str, baud_rate: u32, timeout: Duration) -> Result<Self> {
+        // Open the port, try to reset device state, then re-open to handle
+        // devices/OSes that re-enumerate or require the port to be reopened
+        // after an AVR reset. This makes cold-device init more reliable.
         let mut port = Self::open_port(port_name, baud_rate, timeout)?;
         Self::reset_device_state_for_probe(&mut *port, port_name, baud_rate)?;
+
+        // Give the device a bit more time to reboot and allow USB re-enumeration.
+        thread::sleep(Duration::from_millis(1000));
+
+        // Drop and re-open the serial port to handle cases where the device
+        // disconnected briefly during reset (common with some USB-serial chips).
+        drop(port);
+        let mut port = Self::open_port(port_name, baud_rate, timeout)?;
+
         let info = Self::probe_device_info(&mut *port, port_name, baud_rate)?;
 
         Ok(Self {
@@ -324,8 +370,21 @@ impl GbxcartDevice {
         log_power_query("binary query cart power", &power_query);
 
         self.configure_modern_game_boy_mode()?;
+
+        // If cart was reported off before configuration, attempt to power it on.
         if matches!(power_query, Ok(0)) {
             self.power_on_cartridge_binary()?;
+
+            // Give the hardware a moment, then re-check power state and retry once if needed.
+            thread::sleep(Duration::from_millis(250));
+            let power_after = self.request_value(QUERY_CART_POWER_BINARY_COMMAND);
+            log_power_query("binary query cart power after power_on", &power_after);
+            if matches!(power_after, Ok(0)) {
+                // Try one more time before giving up.
+                debug_log("power_on_cartridge_binary did not report powered; retrying once");
+                self.power_on_cartridge_binary().context("failed to power on cartridge (after retry)")?;
+                thread::sleep(Duration::from_millis(250));
+            }
         }
 
         self.finish_game_boy_prep()?;
@@ -342,6 +401,16 @@ impl GbxcartDevice {
         self.maybe_set_legacy_voltage()?;
         if self.should_power_on_legacy_cartridge(&power_query) {
             self.power_on_cartridge_legacy()?;
+
+            // Pause briefly and verify power state; retry once if still off.
+            thread::sleep(Duration::from_millis(250));
+            let power_after = self.request_value(QUERY_CART_POWER_COMMAND);
+            log_power_query("query cart power after power_on", &power_after);
+            if matches!(power_after, Ok(0)) {
+                debug_log("power_on_cartridge_legacy did not report powered; retrying once");
+                self.power_on_cartridge_legacy().context("failed to power on cartridge (after retry)")?;
+                thread::sleep(Duration::from_millis(250));
+            }
         }
 
         self.enter_legacy_game_boy_mode()?;
@@ -544,8 +613,13 @@ impl GbxcartDevice {
         clear_buffers(port).ok();
 
         debug_log(&format!("sending reset avr to {port_name} at {baud_rate}"));
+        // Try the traditional reset command. Some devices/firmware may also
+        // support additional bootloader reset commands, but keep the original
+        // behavior and make the reset + reopen sequence more robust instead.
         let _ = send_command(port, RESET_AVR_COMMAND);
-        thread::sleep(Duration::from_millis(500));
+        // Allow more time for the device to reboot before the caller re-opens
+        // the port. 500ms was sometimes too short on certain platforms.
+        thread::sleep(Duration::from_millis(1000));
         clear_buffers(port).ok();
         Ok(())
     }
@@ -653,13 +727,23 @@ impl GbxcartDevice {
         self.set_fw_variable(2, FW_VAR_TRANSFER_SIZE, length as u32)?;
         self.set_fw_variable(4, FW_VAR_ADDRESS, address)?;
         self.set_fw_variable(1, FW_VAR_DMG_ACCESS_MODE, DMG_ACCESS_MODE_ROM_READ)?;
+        // Some firmware/hardware requires pulsing CS on ROM reads as well — mirror
+        // the RAM read behavior by enabling the DMG read CS pulse, then restoring
+        // it once the read completes.
+        self.set_fw_variable(1, FW_VAR_DMG_READ_CS_PULSE, 1)?;
         self.send_command(DMG_CART_READ_COMMAND)
             .context("failed to start DMG ROM read")?;
 
         let mut buffer = vec![0_u8; length];
-        self.read_exact_into(&mut buffer)
-            .context("failed to read DMG ROM bytes")?;
-        Ok(buffer)
+        let read_result = (|| -> Result<Vec<u8>> {
+            self.read_exact_into(&mut buffer)
+                .context("failed to read DMG ROM bytes")?;
+            Ok(buffer)
+        })();
+
+        self.set_fw_variable(1, FW_VAR_DMG_READ_CS_PULSE, 0)
+            .context("failed to restore DMG read CS pulse setting")?;
+        read_result
     }
 
     fn read_dmg_ram(&mut self, address: u16, length: usize) -> Result<Vec<u8>> {

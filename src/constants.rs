@@ -47,6 +47,7 @@ pub(crate) mod gbxcart {
     pub const CART_POWER_ON_BINARY_COMMAND: u8 = 0xF2;
     pub const QUERY_CART_POWER_BINARY_COMMAND: u8 = 0xF4;
     pub const SET_MODE_DMG_COMMAND: u8 = 0xA3;
+    pub const SET_VOLTAGE_3V_BINARY_COMMAND: u8 = 0xA4;
     pub const SET_VOLTAGE_5V_BINARY_COMMAND: u8 = 0xA5;
     pub const SET_VARIABLE_COMMAND: u8 = 0xA6;
     pub const DISABLE_PULLUPS_COMMAND: u8 = 0xAC;

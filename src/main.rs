@@ -108,6 +108,23 @@ fn dump_sram(options: DumpSramOptions, cfg: config::Config) -> Result<()> {
         "Detected title {:?}, cartridge type 0x{:02X}, ROM size code 0x{:02X}, RAM size code 0x{:02X}.",
         header.title, header.cartridge_type, header.rom_size_code, header.ram_size_code
     );
+
+    // If the logo check fails, attempt a single power/voltage toggle and
+    // re-run the prepare/read sequence — this can recover devices that do not
+    // reliably engage 5V on the first attempt.
+    if !header.logo_ok {
+        progress_log("Cartridge header logo invalid; attempting a power/voltage toggle and re-prepare...");
+        // Try a best-effort power toggle; ignore non-fatal errors and retry header read.
+        if let Err(e) = device.ensure_cart_powered() {
+            eprintln!("Warning: power toggle attempt failed: {:#}", e);
+        }
+        header = device.read_cartridge_header()?;
+        println!(
+            "Detected title {:?}, cartridge type 0x{:02X}, ROM size code 0x{:02X}, RAM size code 0x{:02X}.",
+            header.title, header.cartridge_type, header.rom_size_code, header.ram_size_code
+        );
+    }
+
     ensure!(
         header.logo_ok,
         "the cartridge header logo check failed; re-seat the cartridge and try again"
