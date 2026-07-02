@@ -14,7 +14,7 @@ struct Cli {
     config: Option<std::path::PathBuf>,
 
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -53,16 +53,22 @@ pub struct DumpSramOptions {
 pub fn parse() -> (Command, Option<std::path::PathBuf>) {
     let cli = Cli::parse();
     let cmd = match cli.command {
-        Command::Ports => Command::Ports,
-        Command::DumpSram {
-            output,
-            filename_template,
-            debug,
-        } => Command::DumpSram {
+        Some(Command::Ports) => Command::Ports,
+        Some(Command::DumpSram { output, filename_template, debug }) => Command::DumpSram {
             output,
             filename_template,
             debug,
         },
+        None => {
+            // No subcommand provided: default to DumpSram with no overrides so
+            // the program will read the config file (if present) and use its
+            // settings.
+            Command::DumpSram {
+                output: None,
+                filename_template: None,
+                debug: false,
+            }
+        }
     };
     (cmd, cli.config)
 }
