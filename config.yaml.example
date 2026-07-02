@@ -17,9 +17,31 @@ output_path: "out.sav"
 photo_output_dir: "photos"
 
 # Filename template for exported photos.
-# When omitted, program uses DEFAULT_FILENAME_TEMPLATE.
-# Example placeholders are program-defined; this is illustrative.
-filename_template: "photo_{slot}_{index}.png"
+# Templates use placeholders wrapped in { } which are replaced at export time.
+# Supported placeholder fields:
+#   - year      : 4-digit year (e.g., 2026)
+#   - month     : month number (1-12)
+#   - day       : day of month (1-31)
+#   - hour24    : hour in 24-hour clock (0-23)
+#   - hour12    : hour in 12-hour clock (1-12)
+#   - minute    : minute (0-59)
+#   - sequential: sequential export number (from the exporter context)
+#   - slot      : photo slot number on the cartridge
+# Width specifier:
+#   Append :N to a field to zero-pad the numeric value to width N (for example, {month:02} -> "05").
+#   If the specifier is omitted, hour/minute fields default to 2 digits (e.g., "07");
+#   other numeric fields use the minimal necessary width (no leading zeros).
+# Escaping braces:
+#   To include a literal brace in the output, double it in the template: "{{" renders as "{" and "}}" renders as "}".
+# Restrictions and validation:
+#   - The rendered filename must be non-empty.
+#   - The template must not produce path separators ("/" or "\\") in the filename.
+#   - Unknown fields will produce an error when rendering the template.
+# Examples:
+#   "{year}-{month:02}-{day:02}_{hour24:02}-{minute:02}_photo-{sequential:02}_slot-{slot:02}.png"
+#   "photo_slot-{slot:02}_#{sequential}.png"
+# When omitted, the program uses the default filename template shown in the first example above.
+filename_template: "{year}-{month:02}-{day:02}_{hour24:02}-{minute:02}_photo-{sequential:02}_slot-{slot:02}.png"
 
 # If true, dump all photo slots including those marked deleted.
 # Default: false
