@@ -224,18 +224,6 @@ fn write_grayscale_png(output_path: &Path, pixels: &[u8], width: u32, height: u3
         .with_context(|| format!("failed to write PNG data to {}", output_path.display()))
 }
 
-pub fn mark_all_photos_deleted_in_bytes(sram: &mut [u8]) -> Result<()> {
-    ensure!(
-        sram.len() == SRAM_SIZE,
-        "expected a {}-byte Game Boy Camera SRAM dump, got {} bytes",
-        SRAM_SIZE,
-        sram.len()
-    );
-
-    sram[STATE_VECTOR_OFFSET..STATE_VECTOR_OFFSET + PHOTO_SLOT_COUNT].fill(EMPTY_ALBUM_SLOT);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

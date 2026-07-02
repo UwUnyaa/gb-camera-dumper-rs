@@ -47,10 +47,6 @@ filename_template: "{year}-{month:02}-{day:02}_{hour24:02}-{minute:02}_photo-{se
 # Default: false
 dump_all_photos: true
 
-# If true, mark photos as deleted on the cartridge after dumping.
-# Default: false
-mark_deleted_after_dump: false
-
 # Optional custom 4-color palette as hex strings. Must be exactly 4 entries.
 # Default: program's grayscale palette.
 palette:

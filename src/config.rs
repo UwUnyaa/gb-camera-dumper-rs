@@ -22,9 +22,6 @@ pub struct Config {
     /// If true, dump all photo slots including those marked deleted; otherwise only active photos are exported.
     pub dump_all_photos: Option<bool>,
 
-    /// If true, mark photos as deleted on the cartridge after dumping them.
-    pub mark_deleted_after_dump: Option<bool>,
-
     /// Optional custom 4-color palette as hex strings (e.g. ["#000000","#555555","#AAAAAA","#FFFFFF"]).
     /// If omitted, a default grayscale palette is applied by the program.
     pub palette: Option<[String; 4]>,
@@ -194,14 +191,13 @@ mod tests {
     fn test_parse_config() {
         let mut path = std::env::temp_dir();
         path.push(format!("gb-camera-dumper-test-{}.yaml", std::process::id()));
-        let yaml = "output_path: \"out.sav\"\nphoto_output_dir: \"photos\"\nfilename_template: \"tmpl\"\ndump_all_photos: true\nmark_deleted_after_dump: false\npalette: [\"#000000\", \"#555555\", \"#AAAAAA\", \"#FFFFFF\"]\nimage_scale: 2\n";
+        let yaml = "output_path: \"out.sav\"\nphoto_output_dir: \"photos\"\nfilename_template: \"tmpl\"\ndump_all_photos: true\npalette: [\"#000000\", \"#555555\", \"#AAAAAA\", \"#FFFFFF\"]\nimage_scale: 2\n";
         fs::write(&path, yaml).unwrap();
         let cfg = parse_config(&path).unwrap();
         assert_eq!(cfg.output_path.unwrap(), "out.sav");
         assert_eq!(cfg.photo_output_dir.unwrap(), "photos");
         assert_eq!(cfg.filename_template.unwrap(), "tmpl");
         assert!(cfg.dump_all_photos.unwrap());
-        assert!(!cfg.mark_deleted_after_dump.unwrap());
         assert_eq!(cfg.palette.unwrap(), ["#000000".to_string(), "#555555".to_string(), "#AAAAAA".to_string(), "#FFFFFF".to_string()]);
         assert_eq!(cfg.image_scale.unwrap(), 2);
         let _ = fs::remove_file(&path);
