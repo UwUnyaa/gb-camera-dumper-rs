@@ -1,15 +1,16 @@
 #+TITLE: gb-camera-dumper-rs
 
-This is a work in progress project that is meant to provide a simple CLI tool to
-dump data from a Game Boy Camera through a GBxCart RW.
+This is a work in progress project that is meant to provide a simple CLI tool
+to dump data from a Game Boy Camera through a GBxCart RW.
 
 * Proof of concept
 
 The current proof of concept auto-detects a GBxCart RW on the available serial
 ports, checks that the inserted cartridge ROM title is one of these supported
 Game Boy Camera titles, dumps the full 128 KiB SRAM image to a file, and
-exports every undeleted photo as a PNG into =gb-camera-photos/= next to the
-SRAM dump:
+exports every undeleted photo as a PNG into =gb-camera-photos= by default
+(next to the SRAM dump if an output file is used; when dumping SRAM into
+memory the default is ./gb-camera-photos):
 
 #+begin_example
 GAMEBOYCAMERA
@@ -29,8 +30,8 @@ cargo run -- dump-sram \
   --filename-template 'photo-{year}{month:02}{day:02}_{hour24:02}{minute:02}_{sequential:02}_slot-{slot:02}.png'
 #+end_example
 
-For now, the PNG export directory is wiped clean on each run so test dumps do
-not leave stale images behind.
+The PNG export directory is not cleared by the tool; existing files are
+preserved and new PNGs are added.
 
 To inspect the serial ports and USB metadata first:
 
@@ -46,5 +47,9 @@ ROM/RAM reads controlled with =R=, =1= and =0=.
 * Configuration
 
 An example config file is included at config.yaml.example in the repository
-root. Copy it to $XDG_CONFIG_HOME/gb-camera-dumper/config.yaml or
+root. Copy it to $XDG_CONFIG_HOME/gb-camera-dumper/config.yaml,
+$HOME/.config/gb-camera-dumper/config.yaml, or
 $HOME/.gb-camera-dumper-config.yaml and edit as needed.
+
+Once configuration is set up, the binary can be ran directly with no
+parameters to perform the desired action.
