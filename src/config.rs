@@ -98,15 +98,78 @@ pub fn load_config_from_path<P: AsRef<Path>>(path_opt: Option<P>) -> Result<Conf
 
 /// Like load_config but allows overriding the XDG and HOME values for testing.
 pub fn load_config_for(xdg: Option<&str>, home: Option<&str>) -> Result<Config> {
-    let path = get_config_path_for(xdg, home);
-    if !path.exists() {
-        // Print a stable message that references XDG_CONFIG_HOME and HOME regardless of env.
-        let xdg_ref = "$XDG_CONFIG_HOME/gb-camera-dumper/config.yaml";
-        let home_ref = "$HOME/.gb-camera-dumper-config.yaml";
-        println!("Config file not found; looked at {} or {}; using defaults.", xdg_ref, home_ref);
-        return Ok(Config::default());
+    // Try several standard locations in order:
+    // 1. $XDG_CONFIG_HOME/gb-camera-dumper/config.yaml (if XDG set or provided)
+    // 2. $HOME/.config/gb-camera-dumper/config.yaml (if HOME set)
+    // 3. $HOME/.gb-camera-dumper-config.yaml (if HOME set)
+    // 4. ./ .gb-camera-dumper-config.yaml (fallback)
+
+    if let Some(xdg_override) = xdg {
+        let mut p = PathBuf::from(xdg_override);
+        p.push("gb-camera-dumper");
+        p.push("config.yaml");
+        if p.exists() {
+            return parse_config(p);
+        }
     }
-    parse_config(path)
+
+    if let Some(home_override) = home {
+        // When a home override is provided, only inspect paths under that home
+        // so tests remain deterministic and don't pick up the real user's config.
+        // Check $HOME/.config/gb-camera-dumper/config.yaml first
+        let mut p1 = PathBuf::from(home_override);
+        p1.push(".config");
+        p1.push("gb-camera-dumper");
+        p1.push("config.yaml");
+        if p1.exists() {
+            return parse_config(p1);
+        }
+        // Then check $HOME/.gb-camera-dumper-config.yaml
+        let p2 = PathBuf::from(home_override).join(".gb-camera-dumper-config.yaml");
+        if p2.exists() {
+            return parse_config(p2);
+        }
+    } else {
+        // No home_override: consult XDG and HOME env vars on the running system.
+        if let Ok(xdg_env) = env::var("XDG_CONFIG_HOME") {
+            let mut p = PathBuf::from(xdg_env);
+            p.push("gb-camera-dumper");
+            p.push("config.yaml");
+            if p.exists() {
+                return parse_config(p);
+            }
+        }
+
+        if let Ok(home_env) = env::var("HOME") {
+            let mut p1 = PathBuf::from(&home_env);
+            p1.push(".config");
+            p1.push("gb-camera-dumper");
+            p1.push("config.yaml");
+            if p1.exists() {
+                return parse_config(p1);
+            }
+            let p2 = PathBuf::from(home_env).join(".gb-camera-dumper-config.yaml");
+            if p2.exists() {
+                return parse_config(p2);
+            }
+        }
+    }
+
+    // Final fallback: look for a file in CWD
+    let fallback = PathBuf::from(".gb-camera-dumper-config.yaml");
+    if fallback.exists() {
+        return parse_config(fallback);
+    }
+
+    // Print a stable message indicating where we looked
+    let xdg_ref = "$XDG_CONFIG_HOME/gb-camera-dumper/config.yaml";
+    let home_ref = "$HOME/.config/gb-camera-dumper/config.yaml";
+    let home_fallback_ref = "$HOME/.gb-camera-dumper-config.yaml";
+    println!(
+        "Config file not found; looked at {}, {}, or {}; using defaults.",
+        xdg_ref, home_ref, home_fallback_ref
+    );
+    Ok(Config::default())
 }
 
 #[cfg(test)]

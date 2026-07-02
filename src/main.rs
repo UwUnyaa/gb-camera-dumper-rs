@@ -163,11 +163,33 @@ fn dump_sram(options: DumpSramOptions, cfg: config::Config) -> Result<()> {
         })?;
     }
 
+    // Helper: expand a leading '~' to the user's HOME directory if present.
+    fn expand_home(path: PathBuf) -> PathBuf {
+        use std::ffi::OsString;
+        let s = path.to_string_lossy();
+        if s == "~" {
+            if let Some(home) = std::env::var_os("HOME") {
+                return PathBuf::from(home);
+            }
+            return path;
+        }
+        if s.starts_with("~/") && let Some(home) = std::env::var_os("HOME") {
+            let rest = s.trim_start_matches("~/");
+            let mut p = PathBuf::from(home);
+            if !rest.is_empty() {
+                p.push(rest);
+            }
+            return p;
+        }
+        // Otherwise return the original path unchanged
+        PathBuf::from(OsString::from(s.as_ref()))
+    }
+
     // Determine photo output directory from config or derive from output path.
     let photo_output_dir = cfg
         .photo_output_dir
         .clone()
-        .map(PathBuf::from)
+        .map(|s| expand_home(PathBuf::from(s)))
         .unwrap_or_else(|| {
             if cfg.sram_in_memory.unwrap_or(true) {
                 // When dumping to memory and no photo_output_dir is provided, use
