@@ -40,22 +40,15 @@ pub fn dump_photos_as_pngs(
 
     if output_dir.exists() {
         progress_log(&format!(
-            "Clearing existing photo output directory {}...",
+            "Using existing photo output directory {}...",
             output_dir.display()
         ));
-        // For testing, start each run from a clean export directory so stale PNGs
-        // from previous dumps do not stick around and look like current results.
-        fs::remove_dir_all(output_dir).with_context(|| {
-            format!(
-                "failed to clear photo output directory {}",
-                output_dir.display()
-            )
-        })?;
+    } else {
+        progress_log(&format!(
+            "Creating photo output directory {}...",
+            output_dir.display()
+        ));
     }
-    progress_log(&format!(
-        "Creating photo output directory {}...",
-        output_dir.display()
-    ));
     fs::create_dir_all(output_dir).with_context(|| {
         format!(
             "failed to create photo output directory {}",
@@ -321,7 +314,9 @@ mod tests {
         let reader = decoder.read_info().unwrap();
 
         assert_eq!(photo_count, 1);
-        assert!(!stale_file.exists());
+        // Do not clear existing directory contents — the tool should dump into an
+        // existing directory without removing stale files.
+        assert!(stale_file.exists());
         assert_eq!(&png_bytes[..8], b"\x89PNG\r\n\x1a\n");
         assert_eq!(reader.info().width, (PHOTO_WIDTH * 2) as u32);
         assert_eq!(reader.info().height, (PHOTO_HEIGHT * 2) as u32);
